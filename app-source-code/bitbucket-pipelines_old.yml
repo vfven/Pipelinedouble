@@ -1,0 +1,483 @@
+# app-source-code/bitbucket-pipelines.yml
+image: atlassian/default-image:3
+
+# =============================================================================
+# INCLUIR DEFINICIONES DEL REPOSITORIO DE INFRAESTRUCTURA
+# =============================================================================
+# NOTA: Los YAML anchors (&) NO funcionan entre repositorios, por eso debemos
+# descargar y ejecutar los scripts manualmente en cada step.
+# =============================================================================
+include:
+  - remote: https://bitbucket.org/bancobase/infra-cicd-tools/raw/develop/bitbucket-pipelines.yml
+
+# =============================================================================
+# VARIABLES ESPECÍFICAS DE ESTA APLICACIÓN
+# =============================================================================
+definitions:
+  variables:
+    - name: APP_NAME
+      value: "mi-aplicacion"
+    - name: APP_PORT
+      value: "3000"
+    - name: CICD_SCRIPTS_BASE_URL
+      value: "https://bitbucket.org/bancobase/infra-cicd-tools/raw/develop"
+
+# =============================================================================
+# PIPELINES PARA ESTA APLICACIÓN
+# =============================================================================
+pipelines:
+  
+  # Pipeline automático para development
+  branches:
+    develop:
+      - step:
+          name: "🔧 Setup Environment"
+          script:
+            - |
+              echo "📥 Descargando scripts de setup..."
+              curl -s -o /tmp/setup.sh ${CICD_SCRIPTS_BASE_URL}/scripts/utils/setup.sh
+              chmod +x /tmp/setup.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="development"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/setup.sh
+
+      - step:
+          name: "🐳 Build Docker Image"
+          services:
+            - docker
+          script:
+            - |
+              echo "📥 Descargando script de build Docker..."
+              curl -s -o /tmp/build-image.sh ${CICD_SCRIPTS_BASE_URL}/scripts/docker/build-image.sh
+              chmod +x /tmp/build-image.sh
+              export APP_NAME="mi-aplicacion"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/build-image.sh
+
+      - step:
+          name: "📋 Generate K8s Manifests"
+          script:
+            - |
+              echo "📥 Descargando script de generación de manifiestos..."
+              curl -s -o /tmp/generate-manifests.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/generate-manifests.sh
+              chmod +x /tmp/generate-manifests.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="development"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/generate-manifests.sh
+
+      - step:
+          name: "🚀 Deploy to Rancher"
+          script:
+            - |
+              echo "📥 Descargando script de deploy a Rancher..."
+              curl -s -o /tmp/deploy-to-rancher.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/deploy-to-rancher.sh
+              chmod +x /tmp/deploy-to-rancher.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="development"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/deploy-to-rancher.sh
+
+      - step:
+          name: "✅ Notify Success"
+          script:
+            - |
+              echo "🚀 Deployment to Rancher completed successfully!"
+              echo "Application: mi-aplicacion"
+              echo "Environment: development"
+              echo "Image Tag: ${BITBUCKET_BUILD_NUMBER}"
+              echo "Timestamp: $(date)"
+
+  # Pipeline automático para production
+    main:
+      - step:
+          name: "🔧 Setup Environment"
+          script:
+            - |
+              echo "📥 Descargando scripts de setup..."
+              curl -s -o /tmp/setup.sh ${CICD_SCRIPTS_BASE_URL}/scripts/utils/setup.sh
+              chmod +x /tmp/setup.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="production"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/setup.sh
+
+      - step:
+          name: "🔍 Detect JIRA Keys"
+          script:
+            - |
+              echo "📥 Descargando script de detección JIRA..."
+              curl -s -o /tmp/detect-jira-keys.sh ${CICD_SCRIPTS_BASE_URL}/scripts/jira/detect-jira-keys.sh
+              chmod +x /tmp/detect-jira-keys.sh
+              /tmp/detect-jira-keys.sh
+
+      - step:
+          name: "🐳 Build Docker Image"
+          services:
+            - docker
+          script:
+            - |
+              echo "📥 Descargando script de build Docker..."
+              curl -s -o /tmp/build-image.sh ${CICD_SCRIPTS_BASE_URL}/scripts/docker/build-image.sh
+              chmod +x /tmp/build-image.sh
+              export APP_NAME="mi-aplicacion"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/build-image.sh
+
+      - step:
+          name: "📤 Push to ECR"
+          services:
+            - docker
+          script:
+            - |
+              echo "📥 Descargando script de push ECR..."
+              apt-get update && apt-get install -y python3-pip
+              pip3 install awscli
+              curl -s -o /tmp/push-to-ecr.sh ${CICD_SCRIPTS_BASE_URL}/scripts/docker/push-to-ecr.sh
+              chmod +x /tmp/push-to-ecr.sh
+              /tmp/push-to-ecr.sh
+
+      - step:
+          name: "📋 Generate K8s Manifests"
+          script:
+            - |
+              echo "📥 Descargando script de generación de manifiestos..."
+              curl -s -o /tmp/generate-manifests.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/generate-manifests.sh
+              chmod +x /tmp/generate-manifests.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="production"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/generate-manifests.sh
+
+      - step:
+          name: "☸️ Deploy to EKS"
+          script:
+            - |
+              echo "📥 Descargando script de deploy EKS..."
+              curl -s -o /tmp/deploy-to-eks.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/deploy-to-eks.sh
+              chmod +x /tmp/deploy-to-eks.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="production"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/deploy-to-eks.sh
+
+      - step:
+          name: "💬 Notify JIRA"
+          script:
+            - |
+              echo "📥 Descargando script de comentario JIRA..."
+              curl -s -o /tmp/comment-jira.sh ${CICD_SCRIPTS_BASE_URL}/scripts/jira/comment-jira.sh
+              chmod +x /tmp/comment-jira.sh
+              
+              # Buscar automáticamente la clave JIRA del commit o usar una por defecto
+              JIRA_ISSUE_KEY="PROJ-123"  # Esto debería ser dinámico en la realidad
+              JIRA_COMMENT="Deployed to production successfully! Build: ${BITBUCKET_BUILD_NUMBER}"
+              
+              echo "📝 Comentando en JIRA issue: ${JIRA_ISSUE_KEY}"
+              /tmp/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
+
+      - step:
+          name: "✅ Notify Success"
+          script:
+            - |
+              echo "🎉 PRODUCTION DEPLOYMENT COMPLETED!"
+              echo "===================================="
+              echo "Application: mi-aplicacion"
+              echo "Environment: production"
+              echo "Image Tag: ${BITBUCKET_BUILD_NUMBER}"
+              echo "Deploy Time: $(date)"
+              echo "Status: SUCCESS"
+
+  # ===========================================================================
+  # PIPELINES MANUALES (CUSTOM)
+  # ===========================================================================
+  custom:
+    # -------------------------------------------------------------------------
+    # 🐳 DOCKER PIPELINES
+    # -------------------------------------------------------------------------
+    docker-build:
+      - step:
+          name: "🐳 Build Docker Image Only"
+          services:
+            - docker
+          script:
+            - |
+              echo "📥 Descargando script de build Docker..."
+              curl -s -o /tmp/build-image.sh ${CICD_SCRIPTS_BASE_URL}/scripts/docker/build-image.sh
+              chmod +x /tmp/build-image.sh
+              export APP_NAME="mi-aplicacion"
+              export IMAGE_TAG="manual-${BITBUCKET_BUILD_NUMBER}"
+              /tmp/build-image.sh
+
+    docker-push-ecr:
+      - step:
+          name: "📤 Push to ECR"
+          services:
+            - docker
+          script:
+            - |
+              echo "📥 Descargando script de push ECR..."
+              apt-get update && apt-get install -y python3-pip
+              pip3 install awscli
+              curl -s -o /tmp/push-to-ecr.sh ${CICD_SCRIPTS_BASE_URL}/scripts/docker/push-to-ecr.sh
+              chmod +x /tmp/push-to-ecr.sh
+              /tmp/push-to-ecr.sh
+
+    # -------------------------------------------------------------------------
+    # 🔗 JIRA PIPELINES
+    # -------------------------------------------------------------------------
+    jira-comment:
+      - variables:
+          - name: JIRA_ISSUE_KEY
+            value: "PROJ-123"
+          - name: JIRA_COMMENT
+            value: "Comentario automático desde Bitbucket Pipeline"
+      - step:
+          name: "💬 Comentar en JIRA Issue"
+          script:
+            - |
+              echo "📥 Descargando script de comentario JIRA..."
+              curl -s -o /tmp/comment-jira.sh ${CICD_SCRIPTS_BASE_URL}/scripts/jira/comment-jira.sh
+              chmod +x /tmp/comment-jira.sh
+              
+              echo "📝 Ejecutando comentario en JIRA..."
+              echo "Issue: ${JIRA_ISSUE_KEY}"
+              echo "Comentario: ${JIRA_COMMENT}"
+              
+              /tmp/comment-jira.sh "${JIRA_ISSUE_KEY}" "${JIRA_COMMENT}"
+
+    jira-detect:
+      - step:
+          name: "🔍 Detectar Claves JIRA"
+          script:
+            - |
+              echo "📥 Descargando script de detección JIRA..."
+              curl -s -o /tmp/detect-jira-keys.sh ${CICD_SCRIPTS_BASE_URL}/scripts/jira/detect-jira-keys.sh
+              chmod +x /tmp/detect-jira-keys.sh
+              
+              echo "🔍 Analizando commit message..."
+              /tmp/detect-jira-keys.sh
+
+    # -------------------------------------------------------------------------
+    # ☸️ KUBERNETES PIPELINES
+    # -------------------------------------------------------------------------
+    k8s-generate-manifests:
+      - step:
+          name: "📋 Generate K8s Manifests"
+          script:
+            - |
+              echo "📥 Descargando script de generación de manifiestos..."
+              curl -s -o /tmp/generate-manifests.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/generate-manifests.sh
+              chmod +x /tmp/generate-manifests.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="manual"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/generate-manifests.sh
+
+    k8s-deploy-rancher:
+      - step:
+          name: "🚀 Deploy to Rancher"
+          script:
+            - |
+              echo "📥 Descargando script de deploy a Rancher..."
+              curl -s -o /tmp/deploy-to-rancher.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/deploy-to-rancher.sh
+              chmod +x /tmp/deploy-to-rancher.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="development"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/deploy-to-rancher.sh
+
+    k8s-deploy-eks:
+      - step:
+          name: "☸️ Deploy to EKS"
+          script:
+            - |
+              echo "📥 Descargando script de deploy EKS..."
+              curl -s -o /tmp/deploy-to-eks.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/deploy-to-eks.sh
+              chmod +x /tmp/deploy-to-eks.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="production"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/deploy-to-eks.sh
+
+    # -------------------------------------------------------------------------
+    # 🐛 DEBUG PIPELINES
+    # -------------------------------------------------------------------------
+    debug-cicd-tools:
+      - step:
+          name: "🐛 Debug - Verificar Acceso a Scripts Remotos"
+          script:
+            - |
+              echo "🔍 DEBUG: Verificando acceso a scripts remotos"
+              echo "=============================================="
+              
+              # Variables disponibles
+              echo "✅ Variables de entorno:"
+              echo "   CICD_SCRIPTS_BASE_URL: ${CICD_SCRIPTS_BASE_URL}"
+              echo "   APP_NAME: ${APP_NAME}"
+              echo "   APP_PORT: ${APP_PORT}"
+              
+              # Test conexión HTTP a scripts
+              echo ""
+              echo "🌐 Test de conectividad a scripts:"
+              scripts=(
+                "scripts/utils/setup.sh"
+                "scripts/docker/build-image.sh"
+                "scripts/docker/push-to-ecr.sh"
+                "scripts/jira/detect-jira-keys.sh"
+                "scripts/jira/comment-jira.sh"
+                "scripts/kubernetes/generate-manifests.sh"
+                "scripts/kubernetes/deploy-to-rancher.sh"
+                "scripts/kubernetes/deploy-to-eks.sh"
+              )
+              
+              for script_path in "${scripts[@]}"; do
+                script_url="${CICD_SCRIPTS_BASE_URL}/${script_path}"
+                if curl -s -I "$script_url" | head -1 | grep -q "200"; then
+                  echo "   ✅ $(basename $script_path): ACCESIBLE"
+                else
+                  echo "   ❌ $(basename $script_path): NO ACCESIBLE"
+                fi
+              done
+              
+              # Descargar y verificar un script de ejemplo
+              echo ""
+              echo "📥 Test descarga de script ejemplo:"
+              sample_script_url="${CICD_SCRIPTS_BASE_URL}/scripts/docker/build-image.sh"
+              curl -s -o /tmp/debug-script.sh "$sample_script_url"
+              
+              if [ -f "/tmp/debug-script.sh" ]; then
+                echo "   ✅ Script descargado: /tmp/debug-script.sh"
+                echo "   📏 Tamaño: $(wc -l < /tmp/debug-script.sh) líneas"
+                echo "   🚀 Ejecutable: $(chmod +x /tmp/debug-script.sh && echo 'YES')"
+                echo "   📋 SHA256: $(sha256sum /tmp/debug-script.sh | cut -d' ' -f1)"
+              else
+                echo "   ❌ No se pudo descargar el script"
+              fi
+
+    debug-environment:
+      - step:
+          name: "🐛 Debug - Variables y Entorno"
+          script:
+            - |
+              echo "🔍 DEBUG: Variables de entorno y configuración"
+              echo "=============================================="
+              
+              # Variables de Bitbucket
+              echo "🏷️ Bitbucket Variables:"
+              echo "   BITBUCKET_BUILD_NUMBER: ${BITBUCKET_BUILD_NUMBER}"
+              echo "   BITBUCKET_COMMIT: ${BITBUCKET_COMMIT}"
+              echo "   BITBUCKET_BRANCH: ${BITBUCKET_BRANCH}"
+              echo "   BITBUCKET_REPO_SLUG: ${BITBUCKET_REPO_SLUG}"
+              
+              # Variables de aplicación
+              echo ""
+              echo "📦 Application Variables:"
+              echo "   APP_NAME: ${APP_NAME}"
+              echo "   APP_PORT: ${APP_PORT}"
+              
+              # Verificar comandos disponibles
+              echo ""
+              echo "🔧 Herramientas disponibles:"
+              for cmd in docker curl aws git; do
+                if command -v $cmd &> /dev/null; then
+                  echo "   ✅ $cmd: $(which $cmd)"
+                else
+                  echo "   ❌ $cmd: NOT FOUND"
+                fi
+              done
+
+    # -------------------------------------------------------------------------
+    # 🚀 PIPELINE COMPLETO (End-to-End)
+    # -------------------------------------------------------------------------
+    full-pipeline:
+      - step:
+          name: "1. 🔧 Setup Environment"
+          script:
+            - |
+              curl -s -o /tmp/setup.sh ${CICD_SCRIPTS_BASE_URL}/scripts/utils/setup.sh
+              chmod +x /tmp/setup.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="production"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/setup.sh
+
+      - step:
+          name: "2. 🔍 Detect JIRA Keys"
+          script:
+            - |
+              curl -s -o /tmp/detect-jira-keys.sh ${CICD_SCRIPTS_BASE_URL}/scripts/jira/detect-jira-keys.sh
+              chmod +x /tmp/detect-jira-keys.sh
+              /tmp/detect-jira-keys.sh
+
+      - step:
+          name: "3. 🐳 Build Docker Image"
+          services:
+            - docker
+          script:
+            - |
+              curl -s -o /tmp/build-image.sh ${CICD_SCRIPTS_BASE_URL}/scripts/docker/build-image.sh
+              chmod +x /tmp/build-image.sh
+              export APP_NAME="mi-aplicacion"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/build-image.sh
+
+      - step:
+          name: "4. 📤 Push to ECR"
+          services:
+            - docker
+          script:
+            - |
+              apt-get update && apt-get install -y python3-pip
+              pip3 install awscli
+              curl -s -o /tmp/push-to-ecr.sh ${CICD_SCRIPTS_BASE_URL}/scripts/docker/push-to-ecr.sh
+              chmod +x /tmp/push-to-ecr.sh
+              /tmp/push-to-ecr.sh
+
+      - step:
+          name: "5. 📋 Generate K8s Manifests"
+          script:
+            - |
+              curl -s -o /tmp/generate-manifests.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/generate-manifests.sh
+              chmod +x /tmp/generate-manifests.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="production"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/generate-manifests.sh
+
+      - step:
+          name: "6. ☸️ Deploy to EKS"
+          script:
+            - |
+              curl -s -o /tmp/deploy-to-eks.sh ${CICD_SCRIPTS_BASE_URL}/scripts/kubernetes/deploy-to-eks.sh
+              chmod +x /tmp/deploy-to-eks.sh
+              export APP_NAME="mi-aplicacion"
+              export ENVIRONMENT="production"
+              export IMAGE_TAG="${BITBUCKET_BUILD_NUMBER}"
+              /tmp/deploy-to-eks.sh
+
+      - step:
+          name: "7. 💬 Notify JIRA"
+          script:
+            - |
+              curl -s -o /tmp/comment-jira.sh ${CICD_SCRIPTS_BASE_URL}/scripts/jira/comment-jira.sh
+              chmod +x /tmp/comment-jira.sh
+              
+              JIRA_ISSUE_KEY="PROJ-123"
+              JIRA_COMMENT="Pipeline completo ejecutado exitosamente! Build: ${BITBUCKET_BUILD_NUMBER}"
+              
+              /tmp/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
+
+      - step:
+          name: "8. ✅ Completion"
+          script:
+            - |
+              echo "🎉 FULL PIPELINE COMPLETED SUCCESSFULLY!"
+              echo "========================================"
+              echo "Application: mi-aplicacion"
+              echo "Environment: production"
+              echo "Image Tag: ${BITBUCKET_BUILD_NUMBER}"
+              echo "Total Steps: 8"
+              echo "Status: SUCCESS"
+              echo "Completion Time: $(date)"

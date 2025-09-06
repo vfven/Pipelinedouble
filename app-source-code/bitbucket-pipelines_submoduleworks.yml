@@ -1,0 +1,24 @@
+image: atlassian/default-image:3
+
+pipelines:
+  default:
+    - step:
+        name: Debug Simplificado
+        script:
+          - echo "Iniciando pipeline..."
+          - git submodule update --init --recursive || { echo "Error al inicializar submódulo"; exit 1; }
+          - echo "Contenido de .gitmodules:"
+          - cat .gitmodules
+          - echo "Estado del submódulo:"
+          - git submodule status
+          - echo "Rama actual del submódulo:"
+          - cd infra-cicd-tools && git branch && cd ..
+          - echo "Listado de archivos en la raíz:"
+          - ls -lrt
+          - echo "Verificando existencia de infra-cicd-tools:"
+          - ls -la infra-cicd-tools/ || echo "Carpeta infra-cicd-tools no encontrada"
+          - echo "Verificando existencia de scripts/jira:"
+          - ls -la infra-cicd-tools/scripts/jira/ || echo "Carpeta scripts/jira no encontrada"
+          - echo "Ejecutando script de prueba..."
+          - infra-cicd-tools/scripts/jira/detect-jira-keys.sh "Mensaje de prueba con JD-179" || echo "Error al ejecutar script"
+          - echo "Pipeline completado."
