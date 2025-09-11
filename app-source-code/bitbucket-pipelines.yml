@@ -15,7 +15,7 @@ definitions:
     - name: APP_PORT
       value: "3000"
     - name: DEFAULT_ENV
-      value: "development"
+      value: "main"
     - name: DEFAULT_IMAGE_TAG
       value: "${BITBUCKET_BUILD_NUMBER}"
 
@@ -39,8 +39,10 @@ definitions:
         name: "Load Environment Variables"
         script:
           - echo "📦 Cargando variables personalizadas del .env"
-          - grep -v '^#' .env | sed 's/^/export /' > export_vars.sh
-          - head -n 10 export_vars.sh
+          #- grep -v '^#' .env | sed 's/^/export /' > export_vars.sh
+          #- head -n 10 export_vars.sh
+          - chmod +x infra-cicd-tools/scripts/utils/load-env.sh
+          - ./infra-cicd-tools/scripts/utils/load-env.sh "${ENVIRONMENT:-development}"
         artifacts:
           - export_vars.sh
 
@@ -52,6 +54,7 @@ definitions:
     - &setup-dev-environment
         name: "Setup Dev Environment"
         script:
+          - source export_vars.sh
           - echo "--- Configurando entorno DEVELOPMENT ---"
           - export $(cat custom-vars.env | xargs)
           - export ENVIRONMENT="${DEV_ENVIRONMENT:-development}"
@@ -73,6 +76,7 @@ definitions:
     - &setup-prod-environment
         name: "Setup Prod Environment"
         script:
+          - source export_vars.sh
           - echo "--- Configurando entorno PRODUCTION ---"
           - export $(cat custom-vars.env | xargs)
           - export ENVIRONMENT="${PROD_ENVIRONMENT:-production}"
@@ -102,20 +106,29 @@ definitions:
         script:
           - source export_vars.sh
           - chmod +x infra-cicd-tools/scripts/docker/build-image.sh
-          - infra-cicd-tools/scripts/docker/build-image.sh
-        artifact: 
+          - infra-cicd-tools/scripts/docker/build-image.sh 2>&1 | tee build-docker-image.log
+        artifacts: 
+          - build-docker-image.log
           - docker-image-info.txt
 
     # Anchor para push a ECR (SIN submodule update)
     - &push-to-ecr
         name: "Push to ECR"
+        image: amazon/aws-cli:2.15.0
         services:
           - docker
         script:
-          - apt-get update && apt-get install -y python3-pip
-          - pip3 install awscli
+          #- apt-get update && apt-get install -y python3-pip
+          #- pip3 install awscli
+          - source export_vars.sh
           - chmod +x infra-cicd-tools/scripts/docker/push-to-ecr.sh
-          - infra-cicd-tools/scripts/docker/push-to-ecr.sh
+          - |
+            exec > >(tee push-to-ecr.log) 2>&1
+            infra-cicd-tools/scripts/docker/push-to-ecr.sh
+        on-fail:
+          strategy: ignore
+        artifacts: 
+          - push-to-ecr.log
 
     # ========================================================================
     # K8S / EKS
@@ -125,40 +138,68 @@ definitions:
     - &generate-k8s-manifests
         name: "Generate K8s Manifests"
         script:
+          - source export_vars.sh
           - chmod +x infra-cicd-tools/scripts/kubernetes/generate-manifests.sh
-          - infra-cicd-tools/scripts/kubernetes/generate-manifests.sh
+          - |
+            exec > >(tee generate-k8s-manifests.log) 2>&1
+            infra-cicd-tools/scripts/kubernetes/generate-manifests.sh
+        on-fail:
+          strategy: ignore
+        artifacts: 
+          - generate-k8s-manifests.log
+          - kubernetes-manifests/**
 
     # Anchor para deploy a Rancher (SIN submodule update)
     - &deploy-to-rancher
         name: "Deploy to Rancher"
         script:
+          - source export_vars.sh
           - chmod +x infra-cicd-tools/scripts/kubernetes/deploy-to-rancher.sh
-          - infra-cicd-tools/scripts/kubernetes/deploy-to-rancher.sh "$APP_NAME" "$ENVIRONMENT" "$IMAGE_TAG"
+          - |
+            exec > >(tee deploy-to-rancher.log) 2>&1
+            infra-cicd-tools/scripts/kubernetes/deploy-to-rancher.sh "$APP_NAME" "$ENVIRONMENT" "$IMAGE_TAG"
+        on-fail:
+          strategy: ignore
+        artifacts: 
+          - deploy-to-rancher.log
 
     # Anchor para deploy a EKS (SIN submodule update)
     - &deploy-to-eks
         name: "Deploy to EKS"
         script:
+          - source export_vars.sh
           - chmod +x infra-cicd-tools/scripts/kubernetes/deploy-to-eks.sh
-          - infra-cicd-tools/scripts/kubernetes/deploy-to-eks.sh "$APP_NAME" "$ENVIRONMENT" "$IMAGE_TAG"
+          - |
+            exec > >(tee deploy-to-eks.log) 2>&1
+            infra-cicd-tools/scripts/kubernetes/deploy-to-eks.sh "$APP_NAME" "$ENVIRONMENT" "$IMAGE_TAG"
+        artifacts: 
+          - deploy-to-eks.log
 
     # ========================================================================
     # JIRA
     # ========================================================================
 
-    # Anchor para detección de claves JIRA (SIN submodule update)
+    # Anchor para detección de claves JIRA
     - &detect-jira-keys
         name: "Detect JIRA Keys"
         script:
           - chmod +x infra-cicd-tools/scripts/jira/detect-jira-keys.sh
-          - infra-cicd-tools/scripts/jira/detect-jira-keys.sh
+          - |
+            exec > >(tee detect-jira-keys.log) 2>&1
+            infra-cicd-tools/scripts/jira/detect-jira-keys.sh
+        artifacts: 
+          - detect-jira-keys.log
 
-    # Anchor para comentar en JIRA (SIN submodule update)
+    # Anchor para comentar en JIRA
     - &comment-jira
         name: "Comment on JIRA"
         script:
           - chmod +x infra-cicd-tools/scripts/jira/comment-jira.sh
-          - infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
+          - |
+            exec > >(tee comment-jira.log) 2>&1
+            infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
+        artifacts: 
+          - comment-jira
     
     # ========================================================================
     # SUCCESS & FAILURE NOTIFICATIONS
@@ -177,7 +218,7 @@ definitions:
         name: "Notify Failure"
         script:
           - |
-            echo "📣 Recolectando logs de todos los steps..."
+            echo "📣 Recolectando logs de todos lSos steps..."
             LOGS=""
             for f in *.log; do
               LOGS="${LOGS}\n--- ${f} ---\n$(cat "$f")";
@@ -187,6 +228,52 @@ definitions:
                 -H 'Content-Type: application/json' \
                 -d "{\"text\": \"🚨 Pipeline failed. Logs:\n$LOGS\"}";
             fi
+
+    # ========================================================================
+    # SUCCESS & FAILURE NOTIFICATIONS
+    # ========================================================================
+    # Step que recolecta y convierte logs SIEMPRE (aunque falle algo antes)
+    - &collect-logs
+        name: "Collect Logs"
+        script:
+          - PIPELINE_LOG="bitbucket-${BITBUCKET_REPO_SLUG}-${BITBUCKET_BUILD_NUMBER}.log"
+          - PIPELINE_HTML="bitbucket-${BITBUCKET_REPO_SLUG}-${BITBUCKET_BUILD_NUMBER}.html"
+
+          # Unir todos los logs individuales
+          - cat *.log > "$PIPELINE_LOG"
+
+          # Convertir a HTML con colores
+          #- npx ansi-to-html --newline < "$PIPELINE_LOG" > "$PIPELINE_HTML"
+          - |
+            {
+              echo "<html><body><pre style='font-family: monospace; white-space: pre-wrap; background:#1e1e1e; color:#dcdcdc; padding:10px;'>"
+              npx ansi-to-html < "$PIPELINE_LOG"
+              echo "</pre></body></html>"
+            } > "$PIPELINE_HTML"  
+
+        artifacts:
+          - bitbucket-*.log
+          - bitbucket-*.html
+
+      # Step único de notificación (correo/webhook)
+    - &notify
+        name: "Notify Result"
+        script:
+          - PIPELINE_LOG="bitbucket-${BITBUCKET_REPO_SLUG}-${BITBUCKET_BUILD_NUMBER}.log"
+          - |
+            # Determinar status del pipeline
+            if grep -q "Command failed" "$PIPELINE_LOG"; then
+              STATUS="failure"
+              echo "❌ Pipeline FAILURE"
+            else
+              STATUS="success"
+              echo "✅ Pipeline SUCCESS"
+            fi
+
+            # Mandar correo o webhook
+            curl -X POST -H 'Content-Type: application/json' \
+              -d "{\"status\":\"$STATUS\",\"run\":\"${BITBUCKET_BUILD_NUMBER}\"}" \
+              https://webhook.site/f99c19fe-d8c5-4227-a3c4-ee7f0ae652ef
 
 # =============================================================================
 # PIPELINES PARA LA APLICACIÓN - CON ARTEFACTOS
@@ -201,7 +288,13 @@ pipelines:
       - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
       - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
       - step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
-      - step: *notify-success           # ← Recibe el artefacto automáticamente
+      #- step: *notify-success           # ← Recibe el artefacto automáticamente
+      #- step: *collect-logs
+      #- step: *notify
+      - step: 
+          <<: *collect-logs
+      - step: 
+          <<: *notify
 
     main:
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
