@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{APP_NAME}}
+  name: $APP_NAME
   labels:
-    app: {{APP_NAME}}
-    environment: {{ENVIRONMENT}}
-    version: {{VERSION}}
+    app: $APP_NAME
+    environment: $ENVIRONMENT
+    version: $VERSION
 spec:
-  replicas: {{REPLICAS}}
+  replicas: $REPLICAS
   selector:
     matchLabels:
-      app: {{APP_NAME}}
+      app: $APP_NAME
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -19,21 +19,21 @@ spec:
   template:
     metadata:
       labels:
-        app: {{APP_NAME}}
-        environment: {{ENVIRONMENT}}
-        version: {{VERSION}}
+        app: $APP_NAME
+        environment: $ENVIRONMENT
+        version: $VERSION
     spec:
       containers:
-      - name: {{APP_NAME}}
-        image: {{IMAGE_REPO}}:{{IMAGE_TAG}}
+      - name: $APP_NAME
+        image: $IMAGE_REPO:$IMAGE_TAG
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: {{APP_PORT}}
+        - containerPort: $APP_PORT
         envFrom:
         - configMapRef:
-            name: {{APP_NAME}}-config
+            name: $APP_NAME-config
         - secretRef:
-            name: {{APP_NAME}}-secret
+            name: $APP_NAME-secret
         resources:
           requests:
             cpu: "100m"
@@ -44,12 +44,12 @@ spec:
         livenessProbe:
           httpGet:
             path: /health
-            port: {{APP_PORT}}
+            port: $APP_PORT
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /ready
-            port: {{APP_PORT}}
+            port: $APP_PORT
           initialDelaySeconds: 5
           periodSeconds: 5
