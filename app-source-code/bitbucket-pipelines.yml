@@ -1,5 +1,5 @@
 # app-source-code/bitbucket-pipelines.yml
-image: atlassian/default-image:3
+image: atlassian/default-image:5
 
 # =============================================================================
 # DEFINICIONES GLOBALES Y ANCHORS
@@ -180,20 +180,24 @@ definitions:
     # ========================================================================
 
     # Anchor para detección de claves JIRA
-    - &detect-jira-keys
-        name: "Detect JIRA Keys"
+    - &comment-jira
+        name: "Comment Jira"
         script:
-          - chmod +x infra-cicd-tools/scripts/jira/detect-jira-keys.sh
+          - source export_vars.sh
+          - chmod +x infra-cicd-tools/scripts/jira/*.sh
           - |
-            exec > >(tee detect-jira-keys.log) 2>&1
+            exec > >(tee comment-jira.log) 2>&1
             infra-cicd-tools/scripts/jira/detect-jira-keys.sh
+        on-fail:
+          strategy: ignore
         artifacts: 
-          - detect-jira-keys.log
+          - comment-jira.log
 
     # Anchor para comentar en JIRA
-    - &comment-jira
+    - &comment-jira_old
         name: "Comment on JIRA"
         script:
+          - source export_vars.sh
           - chmod +x infra-cicd-tools/scripts/jira/comment-jira.sh
           - |
             exec > >(tee comment-jira.log) 2>&1
@@ -256,7 +260,7 @@ definitions:
           - bitbucket-*.html
 
       # Step único de notificación (correo/webhook)
-    - &notify
+    - &notify_old
         name: "Notify Result"
         script:
           - PIPELINE_LOG="bitbucket-${BITBUCKET_REPO_SLUG}-${BITBUCKET_BUILD_NUMBER}.log"
@@ -275,6 +279,58 @@ definitions:
               -d "{\"status\":\"$STATUS\",\"run\":\"${BITBUCKET_BUILD_NUMBER}\"}" \
               https://webhook.site/f99c19fe-d8c5-4227-a3c4-ee7f0ae652ef
 
+      # Step único de notificación (correo/webhook)
+    - &notify
+        name: "Notify Result"
+        script:
+          - PIPELINE_LOG="bitbucket-${BITBUCKET_REPO_SLUG}-${BITBUCKET_BUILD_NUMBER}.log"
+          - |
+            # Determinar status del pipeline
+            if grep -q "Command failed" "$PIPELINE_LOG"; then
+              STATUS="failure"
+              echo "❌ Pipeline FAILURE"
+            else
+              STATUS="success"
+              echo "✅ Pipeline SUCCESS"
+            fi
+
+            # Construir URL del artefacto en Bitbucket
+            ARTIFACT_URL="https://api.bitbucket.org/2.0/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pipelines/${BITBUCKET_PIPELINE_UUID}/steps/${BITBUCKET_STEP_UUID}/artifacts/${PIPELINE_LOG}"
+
+            # Mandar webhook a Google Chat
+            curl -X POST "https://chat.googleapis.com/v1/spaces/AAQAqKIPdhM/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=O_SdO80UHktZobL__l50Ihvkan-eGr4UHdhtIWw-09c" \
+              -H "Content-Type: application/json" \
+              -d "{
+                    \"cards\": [{
+                      \"header\": {
+                        \"title\": \"Pipeline Notification\",
+                        \"subtitle\": \"Build #${BITBUCKET_BUILD_NUMBER}\"
+                      },
+                      \"sections\": [{
+                        \"widgets\": [
+                          {
+                            \"textParagraph\": {
+                              \"text\": \"<b>Resultado:</b> ${STATUS}<br><b>Pipeline:</b> #${BITBUCKET_BUILD_NUMBER}\"
+                            }
+                          },
+                          {
+                            \"buttons\": [{
+                              \"textButton\": {
+                                \"text\": \"📥 Descargar Log\",
+                                \"onClick\": {
+                                  \"openLink\": { \"url\": \"${ARTIFACT_URL}\" }
+                                }
+                              }
+                            }]
+                          }
+                        ]
+                      }]
+                    }]
+                  }"
+        artifacts:
+         - bitbucket-*.log
+         - bitbucket-*.html
+
 # =============================================================================
 # PIPELINES PARA LA APLICACIÓN - CON ARTEFACTOS
 # =============================================================================
@@ -288,8 +344,8 @@ pipelines:
       - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
       - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
       - step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
-      #- step: *notify-success           # ← Recibe el artefacto automáticamente
-      #- step: *collect-logs
+      #- step: *detect-jira-keys           # ← Recibe el artefacto automáticamente
+      - step: *comment-jira
       #- step: *notify
       - step: 
           <<: *collect-logs
@@ -299,7 +355,7 @@ pipelines:
     main:
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
       - step: *setup-prod-environment   # ← Recibe el artefacto automáticamente
-      - step: *detect-jira-keys         # ← Recibe el artefacto automáticamente
+      #- step: *detect-jira-keys         # ← Recibe el artefacto automáticamente
       - step: *build-docker-image       # ← Recibe el artefacto automáticamente
       - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
       - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
@@ -343,8 +399,9 @@ pipelines:
           - name: JIRA_COMMENT
             value: "Comentario automático desde Bitbucket Pipeline"
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
-      - step: *detect-jira-keys
+      - step: *load-env-vars
       - step: *comment-jira
+      #- step: *comment-jira
       #- step:
       #    name: "Comment on JIRA"
       #    script:
@@ -372,7 +429,7 @@ pipelines:
     full-pipeline:
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
       - step: *setup-prod-environment   # ← Recibe el artefacto automáticamente
-      - step: *detect-jira-keys         # ← Recibe el artefacto automáticamente
+      #- step: *detect-jira-keys         # ← Recibe el artefacto automáticamente
       - step: *build-docker-image       # ← Recibe el artefacto automáticamente
       - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
       - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
