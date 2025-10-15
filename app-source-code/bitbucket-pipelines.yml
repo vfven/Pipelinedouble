@@ -1,5 +1,5 @@
 # app-source-code/bitbucket-pipelines.yml
-image: atlassian/default-image:5
+image: atlassian/default-image:3
 
 # =============================================================================
 # DEFINICIONES GLOBALES Y ANCHORS
@@ -176,6 +176,33 @@ definitions:
           - deploy-to-eks.log
 
     # ========================================================================
+    # SECURITY
+    # ========================================================================
+    # Anchor para escanear imagen con tenable
+    - &hashicorp-value
+        name: "Get Secret"
+        script:
+          - source export_vars.sh
+          - chmod +x infra-cicd-tools/scripts/security/hashicorp-vars.sh
+          - ./infra-cicd-tools/scripts/security/hashicorp-vars.sh 2>&1 | tee hashicorp.log
+        artifacts: 
+          - secret.enc
+          - export_vars.sh
+          - hashicorp.log
+
+    # Anchor para escanear imagen con tenable
+    - &tenable-scan-image
+        name: "Tenable Scan Image"
+        services:
+          - docker
+        script:
+          - source export_vars.sh
+          - chmod +x infra-cicd-tools/scripts/security/tenable-scan.sh
+          - ./infra-cicd-tools/scripts/security/tenable-scan.sh 2>&1 | tee tenable-scan.log
+        artifacts: 
+          - tenable-scan.log
+
+    # ========================================================================
     # JIRA
     # ========================================================================
 
@@ -331,6 +358,17 @@ definitions:
          - bitbucket-*.log
          - bitbucket-*.html
 
+    - &notify_jira
+        name: "Notify Result"
+        script:
+          - |
+            curl -s -D- -u "${JIRA_USERNAME}:${JIRA_API_TOKEN}" \
+              -X POST \
+              -H "X-Atlassian-Token: no-check" \
+              -F "file=@${PIPELINE_HTML}" \
+              "https://bancobase.atlassian.net/rest/api/issue/JD-179/attachments"
+          - echo "Se agrega log a issue"
+
 # =============================================================================
 # PIPELINES PARA LA APLICACIÓN - CON ARTEFACTOS
 # =============================================================================
@@ -339,18 +377,21 @@ pipelines:
     develop:
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
       - step: *load-env-vars            # ← Recibe el artefacto automáticamente
+      - step: *hashicorp-value          # ← Recibe el artefacto automáticamente
       - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
-      - step: *build-docker-image       # ← Recibe el artefacto automáticamente
-      - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
-      - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
-      - step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
+      #- step: *build-docker-image       # ← Recibe el artefacto automáticamente
+      - step: *tenable-scan-image       # ← Recibe el artefacto automáticamente
+      #- step: *push-to-ecr              # ← Recibe el artefacto automáticamente
+      #- step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
+      #- step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
       #- step: *detect-jira-keys           # ← Recibe el artefacto automáticamente
-      - step: *comment-jira
+      #- step: *comment-jira
       #- step: *notify
       - step: 
           <<: *collect-logs
       - step: 
           <<: *notify
+      #- step: *notify_jira
 
     main:
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
@@ -388,6 +429,7 @@ pipelines:
           - name: IMAGE_TAG
             value: "${BITBUCKET_BUILD_NUMBER}"
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
+      - step: *load-env-vars
       - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
       - step: *build-docker-image       # ← Recibe el artefacto automáticamente
       - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
@@ -442,3 +484,13 @@ pipelines:
             - chmod +x infra-cicd-tools/scripts/jira/comment-jira.sh
             - infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
       - step: *notify-success           # ← Recibe el artefacto automáticamente
+
+    tenable-implementation:
+      - step: *init-submodule
+      - step: *load-env-vars 
+      - step:
+          name: "Prueba consumo variables repositorio"
+          script:
+              - echo "📝 Probando acceso a Repository Variable desde script"
+              - chmod +x infra-cicd-tools/scripts/security/hashicorp-vars.sh
+              - ./infra-cicd-tools/scripts/security/hashicorp-vars.sh

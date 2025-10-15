@@ -63,9 +63,13 @@ setup_environment() {
         jq \
         curl \
         git \
-        python3-pip \
-        gettext-base
-    pip install awscli
+        gettext-base \
+        python3-pip 
+    python3 --version
+    #pip3 install awscli
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    ./aws/install
     
     # Configurar AWS CLI si las variables existen
     if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then

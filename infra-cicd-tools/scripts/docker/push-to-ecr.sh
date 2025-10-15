@@ -15,6 +15,24 @@ source infra-cicd-tools/scripts/utils/utils.sh
 init_utilities
 start_timer
 
+VAULT_TOKEN=$(curl -s \
+          --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
+          --request POST \
+          --data "{\"role_id\": \"$ROLE_ID\", \"secret_id\": \"$SECRET_ID\"}" \
+          $VAULT_ADDR/v1/auth/approle/login | jq -r '.auth.client_token')
+       
+RESPONSE=$(curl -s \
+          --header "X-Vault-Token: $VAULT_TOKEN" \
+          --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
+          $VAULT_ADDR/v1/kv/tenable/data/api-token)
+
+echo $RESPONSE
+
+AWS_ACCESS_KEY_ID=$(echo $RESPONSE | jq -r '.data.data.AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY=$(echo $RESPONSE | jq -r '.data.data.AWS_SECRET_ACCESS_KEY')
+AWS_ACCOUNT_ID=$(echo $RESPONSE | jq -r '.data.data.AWS_ACCOUNT_ID')
+AWS_REGION=$(echo $RESPONSE | jq -r '.data.data.AWS_REGION')
+
 log_section "ECR Push Process"
 log_environment
 

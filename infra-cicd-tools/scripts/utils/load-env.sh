@@ -76,6 +76,20 @@ if [[ -n "$PREFIX" ]]; then
   done < "$ENV_FILE"
 fi
 
+VAULT_TOKEN=$(curl -s \
+          --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
+          --request POST \
+          --data "{\"role_id\": \"$ROLE_ID\", \"secret_id\": \"$SECRET_ID\"}" \
+          $VAULT_ADDR/v1/auth/approle/login | jq -r '.auth.client_token')
+       
+RESPONSE=$(curl -s \
+          --header "X-Vault-Token: $VAULT_TOKEN" \
+          --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
+          $VAULT_ADDR/v1/kv/tenable/data/api-token)
+
+#TENABLE_API_TOKEN=$(echo $RESPONSE | jq -r '.data.data.TENABLE_API_TOKEN')
+#echo "export TENABLE_API_TOKEN=\"$TENABLE_API_TOKEN\"" >> export_vars.sh
+
 # === Confirmación ===
 log_success "Variables cargadas correctamente"
-head -n 10 export_vars.sh | sed 's/^/  [OK] /'
+head -n 20 export_vars.sh | sed 's/^/  [OK] /'
