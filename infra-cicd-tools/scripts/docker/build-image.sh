@@ -23,11 +23,12 @@ parse_args "$@"
 
 # Set default values
 APP_NAME="${APP_NAME:-${BITBUCKET_REPO_SLUG:-unknown-app}}"
-IMAGE_TAG="${IMAGE_TAG:-${BITBUCKET_BUILD_NUMBER:-latest}}"
+IMAGE_TAG="${APP_VERSION:-${BITBUCKET_BUILD_NUMBER:-latest}}"
 DOCKERFILE_PATH="${DOCKERFILE_PATH:-Dockerfile}"
 DOCKER_CONTEXT="${DOCKER_CONTEXT:-.}"
 
 log_step "1" "Validating configuration"
+log_info "$APP_VERSION"
 validate_not_empty "APP_NAME"
 validate_not_empty "IMAGE_TAG"
 validate_file_exists "$DOCKERFILE_PATH" "Dockerfile not found at: $DOCKERFILE_PATH"
@@ -52,6 +53,7 @@ safe_exec "echo \"IMAGE_REPO=$APP_NAME\" >> docker-image-info.txt"
 
 log_step "4" "Verifying built image"
 log_command "docker images | grep \"$APP_NAME\""
+log_command "docker save $APP_NAME:$IMAGE_TAG -o docker.tar"
 
 log_duration "Docker build"
 log_success "Docker image built successfully: $APP_NAME:$IMAGE_TAG"

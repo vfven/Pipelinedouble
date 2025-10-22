@@ -108,19 +108,21 @@ definitions:
           - chmod +x infra-cicd-tools/scripts/docker/build-image.sh
           - infra-cicd-tools/scripts/docker/build-image.sh 2>&1 | tee build-docker-image.log
         artifacts: 
+          - docker.tar
           - build-docker-image.log
           - docker-image-info.txt
 
     # Anchor para push a ECR (SIN submodule update)
     - &push-to-ecr
         name: "Push to ECR"
-        image: amazon/aws-cli:2.15.0
+        image: cbytedigital/aws-cli-jq
         services:
           - docker
         script:
           #- apt-get update && apt-get install -y python3-pip
           #- pip3 install awscli
           - source export_vars.sh
+          - docker load -i docker.tar
           - chmod +x infra-cicd-tools/scripts/docker/push-to-ecr.sh
           - |
             exec > >(tee push-to-ecr.log) 2>&1
@@ -196,6 +198,7 @@ definitions:
         services:
           - docker
         script:
+          - docker load -i docker.tar 
           - source export_vars.sh
           - chmod +x infra-cicd-tools/scripts/security/tenable-scan.sh
           - ./infra-cicd-tools/scripts/security/tenable-scan.sh 2>&1 | tee tenable-scan.log
@@ -379,24 +382,22 @@ pipelines:
       - step: *load-env-vars            # ← Recibe el artefacto automáticamente
       - step: *hashicorp-value          # ← Recibe el artefacto automáticamente
       - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
-      #- step: *build-docker-image       # ← Recibe el artefacto automáticamente
+      - step: *build-docker-image       # ← Recibe el artefacto automáticamente
       - step: *tenable-scan-image       # ← Recibe el artefacto automáticamente
-      #- step: *push-to-ecr              # ← Recibe el artefacto automáticamente
-      #- step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
-      #- step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
-      #- step: *detect-jira-keys           # ← Recibe el artefacto automáticamente
-      #- step: *comment-jira
-      #- step: *notify
+      - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
+      - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
+      - step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
+      - step: *comment-jira
+      - step: *notify
       - step: 
           <<: *collect-logs
-      - step: 
-          <<: *notify
+      #- step: 
+      #    <<: *notify
       #- step: *notify_jira
 
     main:
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
       - step: *setup-prod-environment   # ← Recibe el artefacto automáticamente
-      #- step: *detect-jira-keys         # ← Recibe el artefacto automáticamente
       - step: *build-docker-image       # ← Recibe el artefacto automáticamente
       - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
       - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
