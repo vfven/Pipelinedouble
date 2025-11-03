@@ -234,6 +234,15 @@ definitions:
             infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
         artifacts: 
           - comment-jira
+
+    - &jira-automation
+        name: "🎯 JIRA DevOps Automation"
+        script:
+            - source export_vars.sh
+            - chmod +x infra-cicd-tools/scripts/jira/*.sh
+            - ./infra-cicd-tools/scripts/jira/devops-automation.sh
+        artifacts: 
+          - comment-jira
     
     # ========================================================================
     # SUCCESS & FAILURE NOTIFICATIONS
@@ -450,6 +459,16 @@ pipelines:
       #    script:
       #      - chmod +x infra-cicd-tools/scripts/jira/comment-jira.sh
       #      - infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
+      
+    jira-automation-devops:
+      - variables:
+          - name: JIRA_PROJECT_KEY
+            value: "DEVOPS"
+          - name: REPO_NAME
+            value: "gfb_repodeprueba"
+      - step: *init-submodule
+      - step: *load-env-vars
+      - step: *jira-automation
 
     debug-environment:
       - step: *init-submodule           # ← SOLO UNA VEZ con artefacto

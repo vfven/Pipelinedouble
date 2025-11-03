@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Tenable Scan Image
+# Tenable Scan Image - Usando archivo .tar
 # =============================================================================
 
 set -Eeuo pipefail
@@ -17,46 +17,52 @@ source "$UTILS_DIR/security/hashicorp-vars.sh"
 init_utilities
 start_timer
 
-log_section "Validating values"
+log_section "Tenable Security Scan - Local TAR"
 log_environment
-
-# Parse command line arguments
-parse_args "$@"
 
 # Set default values
 APP_NAME="${APP_NAME:-${BITBUCKET_REPO_SLUG:-unknown-app}}"
 IMAGE_TAG="${IMAGE_TAG:-${BITBUCKET_BUILD_NUMBER:-latest}}"
-DOCKERFILE_PATH="${DOCKERFILE_PATH:-Dockerfile}"
-DOCKER_CONTEXT="${DOCKER_CONTEXT:-.}"
+TAR_FILE="docker.tar"
 
 log_step "1" "Validating configuration"
 validate_not_empty "APP_NAME"
 validate_not_empty "IMAGE_TAG"
-validate_file_exists "$DOCKERFILE_PATH" "Dockerfile not found at: $DOCKERFILE_PATH"
-validate_directory_exists "$DOCKER_CONTEXT" "Docker context directory not found: $DOCKER_CONTEXT"
-validate_docker_config
-
-log_step "2" "Image properties"
-log_info "Application: $APP_NAME"
-log_info "Image Tag: $IMAGE_TAG"
 
 hashicorp-vars_tenable
 
-log_command "docker load -i docker.tar"
-log_command "docker images"
-#log_command "docker run $APP_NAME:$IMAGE_TAG"
-#ulog_success "Image is working"
+log_step "2" "Preparing image TAR file"
 
+# Verificar que el archivo .tar existe
+if [ ! -f "$TAR_FILE" ]; then
+    log_info "Creating TAR file from local image..."
+    log_command "docker save $APP_NAME:$IMAGE_TAG -o $TAR_FILE" "Error creating TAR from Docker image"
+else
+    log_info "Using existing TAR file: $TAR_FILE"
+    # Verificar que el TAR sea válido
+    log_command "tar -tf $TAR_FILE > /dev/null" "TAR file is corrupt or invalid"
+fi
+
+log_info "TAR file size: $(du -h $TAR_FILE | cut -f1)"
+
+log_step "3" "Running Tenable Scan on TAR file"
+log_info "Scanning: $TAR_FILE"
+
+chmod 777 $TAR_FILE
+
+# Escanear el archivo .tar directamente - SIN socket de Docker
 log_command "docker run \
   --workdir /tmp/tenable \
-  --volume $BITBUCKET_CLONE_DIR:/tmp/tenable \
+  --volume $(pwd):/tmp/tenable \
   --pull=always tenable/cloud-security-scanner:latest \
-  container-image scan --name $APP_NAME:$IMAGE_TAG \
-  --api-token $TENABLE_API_TOKEN \
+  container-image scan \
+  --archive-path $TAR_FILE \
+  --api-token \"$TENABLE_API_TOKEN\" \
   --api-url $TENABLE_API_URL \
-  --fail-on-min-severity critical"
+  --fail-on-min-severity critical" "Tenable scan failed"
 
-#--env-file .env \
+log_duration "Tenable security scan"
+log_success "Tenable scan completed successfully for: $TAR_FILE"
 
-log_duration "Docker build"
-log_success "Tenable scan successfully: $APP_NAME:$IMAGE_TAG"
+# Opcional: Limpiar el archivo TAR después del scan
+# log_command "rm -f $TAR_FILE" "Error cleaning up TAR file"

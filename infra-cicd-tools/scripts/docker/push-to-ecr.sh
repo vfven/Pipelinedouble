@@ -31,7 +31,7 @@ if [ -f docker-image-info.txt ]; then
     source docker-image-info.txt
 else
     APP_NAME="${APP_NAME:-${BITBUCKET_REPO_SLUG}}"
-    IMAGE_TAG="${APP_VERSION:-${BITBUCKET_BUILD_NUMBER:-1}}"
+    IMAGE_TAG="${IMAGE_TAG:-${APP_VERSION:-${BITBUCKET_BUILD_NUMBER:-1}}}"
     IMAGE_REPO="${IMAGE_REPO:-$APP_NAME}"
     log_warning "docker-image-info.txt not found, using default values"
 fi
@@ -74,9 +74,9 @@ log_step "4" "Tagging and pushing image"
 FULL_IMAGE_NAME="$ECR_REGISTRY:$IMAGE_TAG"
 #log_command "docker tag \"$APP_NAME:$IMAGE_TAG\" \"$FULL_IMAGE_NAME\""
 #FULL_IMAGE_NAME="$ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG"
-log_command "docker tag \"$APP_NAME:$IMAGE_TAG\" \"$ECR_REGISTRY\""
-log_command "echo docker tag \"$APP_NAME:$IMAGE_TAG\" \"$ECR_REGISTRY\""
-log_command "docker push \"$ECR_REGISTRY\""
+log_command "docker tag \"$APP_NAME:$IMAGE_TAG\" \"$ECR_REGISTRY:$IMAGE_TAG\""
+log_command "echo docker tag \"$APP_NAME:$IMAGE_TAG\" \"$ECR_REGISTRY:$IMAGE_TAG\""
+log_command "docker push \"$ECR_REGISTRY:$IMAGE_TAG\""
 
 log_step "5" "Saving push metadata"
 safe_exec "echo \"ECR_IMAGE_URI=$FULL_IMAGE_NAME\" > ecr-push-info.txt"
