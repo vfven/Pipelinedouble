@@ -1,18 +1,17 @@
 #!/bin/bash
 
 # =============================================================================
-# Tenable Scan Image
+# Tenable Scan Image - Usando archivo .tar
 # =============================================================================
 
 set -Eeuo pipefail
 
 # Load utilities
-UTILS_DIR="$(cd "/opt/atlassian/pipelines/agent/build/infra-cicd-tools/scripts/" && pwd)"
+UTILS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../" && pwd)"
 source "$UTILS_DIR/utils/logging.sh"
 source "$UTILS_DIR/utils/error-handling.sh"
 source "$UTILS_DIR/utils/utils.sh"
-source "$UTILS_DIR/jira/jira-comment-utils.sh"
-source "$UTILS_DIR/security/hashicorp-vars.sh" # <--- Este debe etar al final del source para validar porque cambia el path
+source "$UTILS_DIR/security/hashicorp-vars.sh"
 
 # Initialize
 init_utilities
@@ -62,40 +61,8 @@ log_command "docker run \
   --api-url $TENABLE_API_URL \
   --fail-on-min-severity critical" "Tenable scan failed"
 
+log_duration "Tenable security scan"
 log_success "Tenable scan completed successfully for: $TAR_FILE"
 
-
-# =============================================================================
-# JIRA Integration
-# =============================================================================
-log_step "4" "JIRA Integration - Posting to Security Scan Subtask"
-
-# 1. Detectar la subtarea - Flexible con variables
-if [[ -n "${JIRA_SECURITY_SCAN_ISSUE:-}" ]]; then
-    # Si está definida la variable, usarla directamente
-    log_info "Using predefined security scan issue: $JIRA_SECURITY_SCAN_ISSUE"
-    echo "$JIRA_SECURITY_SCAN_ISSUE" > "$JIRA_ISSUES_FILE"
-    log_success "✅ Using security scan issue: $JIRA_SECURITY_SCAN_ISSUE"
-else
-    # Si no está definida, detectar automáticamente
-    detect_security_scan_subtask "auto"
-fi
-
-# 2. Crear comentario con resultados de Tenable
-TENABLE_COMMENT="## 🛡️ Tenable Security Scan - COMPLETED ✅\n\n
-**Application:** ${APP_NAME}\n
-**Image Tag:** ${IMAGE_TAG}\n
-**Scan Date:** $(date)\n
-**Target:** ${TAR_FILE} ($(du -h $TAR_FILE | cut -f1))\n\n
-**Status:** ✅ **PASSED** - No critical vulnerabilities\n\n
-The security scan has been completed successfully.\n\n
----\n
-*Automated security scan by CI/CD Pipeline*"
-
-create_jira_comments "$TENABLE_COMMENT"
-
-# 3. Publicar comentarios en JIRA
-post_jira_comments
-
-log_duration "Tenable security scan with JIRA integration"
-log_success "✅ Tenable scan results successfully posted to security scan subtask"
+# Opcional: Limpiar el archivo TAR después del scan
+# log_command "rm -f $TAR_FILE" "Error cleaning up TAR file"

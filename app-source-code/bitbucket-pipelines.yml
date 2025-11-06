@@ -243,6 +243,15 @@ definitions:
             - ./infra-cicd-tools/scripts/jira/devops-automation.sh
         artifacts: 
           - comment-jira
+
+    - &jira-diagnostic
+        name: "JIRA diagnosic"
+        script:
+            - source export_vars.sh
+            - chmod +x infra-cicd-tools/scripts/jira/*.sh
+            - ./infra-cicd-tools/scripts/jira/jira-diagnostic.sh
+        artifacts: 
+          - comment-jira
     
     # ========================================================================
     # SUCCESS & FAILURE NOTIFICATIONS
@@ -393,13 +402,14 @@ pipelines:
       - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
       - step: *build-docker-image       # ← Recibe el artefacto automáticamente
       - step: *tenable-scan-image       # ← Recibe el artefacto automáticamente
-      - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
-      - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
-      - step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
-      - step: *comment-jira
-      - step: *notify
-      - step: 
-          <<: *collect-logs
+      - step: *jira-diagnostic
+      #- step: *push-to-ecr              # ← Recibe el artefacto automáticamente
+      #- step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
+      #- step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
+      #- step: *comment-jira
+      #- step: *notify
+      #- step: 
+      #    <<: *collect-logs
       #- step: 
       #    <<: *notify
       #- step: *notify_jira
