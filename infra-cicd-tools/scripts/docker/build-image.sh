@@ -7,9 +7,12 @@
 set -Eeuo pipefail
 
 # Load utilities
-source infra-cicd-tools/scripts/utils/logging.sh
-source infra-cicd-tools/scripts/utils/error-handling.sh
-source infra-cicd-tools/scripts/utils/utils.sh
+UTILS_DIR="$(cd "/opt/atlassian/pipelines/agent/build/infra-cicd-tools/scripts/" && pwd)"
+source "$UTILS_DIR/utils/logging.sh"
+source "$UTILS_DIR/utils/error-handling.sh"
+source "$UTILS_DIR/utils/utils.sh"
+source "$UTILS_DIR/jira/jira-comment-utils.sh"
+source "$UTILS_DIR/security/hashicorp-vars.sh"
 
 # Initialize
 init_utilities
@@ -57,3 +60,23 @@ log_command "docker save $APP_NAME:$IMAGE_TAG -o docker.tar"
 
 log_duration "Docker build"
 log_success "Docker image built successfully: $APP_NAME:$IMAGE_TAG"
+
+# =============================================================================
+# JIRA Integration
+# =============================================================================
+log_step "5" "JIRA Integration - Build Docker Image"
+
+detect_subtask "Build Docker Image"
+
+# Incluir en el comentario
+DOCKER_COMMENT="Docker Image Build - COMPLETED
+Image: ${APP_NAME}:${IMAGE_TAG}
+Action: Doker image build successfully
+Date: $(date)
+Status: ✅ COMPLETED"
+
+SAFE_COMMENT=$(echo "$DOCKER_COMMENT" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+create_jira_comments "$SAFE_COMMENT"
+#create_jira_comments "$TENABLE_COMMENT"
+
+post_jira_comments

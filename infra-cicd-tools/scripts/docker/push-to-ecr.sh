@@ -7,10 +7,11 @@
 set -Eeuo pipefail
 
 # Load utilities
-UTILS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../" && pwd)"
+UTILS_DIR="$(cd "/opt/atlassian/pipelines/agent/build/infra-cicd-tools/scripts/" && pwd)"
 source "$UTILS_DIR/utils/logging.sh"
 source "$UTILS_DIR/utils/error-handling.sh"
 source "$UTILS_DIR/utils/utils.sh"
+source "$UTILS_DIR/jira/jira-comment-utils.sh"
 source "$UTILS_DIR/security/hashicorp-vars.sh"
 
 # Initialize
@@ -85,3 +86,23 @@ safe_exec "echo \"IMAGE_TAG=$IMAGE_TAG\" >> ecr-push-info.txt"
 
 log_duration "ECR push"
 log_success "Image successfully pushed to ECR: $FULL_IMAGE_NAME"
+
+# =============================================================================
+# JIRA Integration
+# =============================================================================
+log_step "6" "JIRA Integration - Posting to Security Scan Subtask"
+
+detect_subtask "Push to Container Registry"
+
+# Incluir en el comentario
+ECR_COMMENT="ECR Push - COMPLETED
+Image: ${FULL_IMAGE_NAME}
+Action: Successfully pushed to ECR
+Date: $(date)
+Status: ✅ COMPLETED"
+
+SAFE_COMMENT=$(echo "$ECR_COMMENT" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+create_jira_comments "$SAFE_COMMENT"
+#create_jira_comments "$TENABLE_COMMENT"
+
+post_jira_comments

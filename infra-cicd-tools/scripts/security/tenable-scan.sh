@@ -60,9 +60,13 @@ log_command "docker run \
   --archive-path $TAR_FILE \
   --api-token \"$TENABLE_API_TOKEN\" \
   --api-url $TENABLE_API_URL \
-  --fail-on-min-severity critical" "Tenable scan failed"
+  --output-file-formats json --output-path . \
+ --fail-on-min-severity critical" "Tenable scan failed"
 
+#"Tenable scan failed"
 log_success "Tenable scan completed successfully for: $TAR_FILE"
+
+cat results.json
 
 
 # =============================================================================
@@ -70,31 +74,47 @@ log_success "Tenable scan completed successfully for: $TAR_FILE"
 # =============================================================================
 log_step "4" "JIRA Integration - Posting to Security Scan Subtask"
 
-# 1. Detectar la subtarea - Flexible con variables
-if [[ -n "${JIRA_SECURITY_SCAN_ISSUE:-}" ]]; then
-    # Si está definida la variable, usarla directamente
-    log_info "Using predefined security scan issue: $JIRA_SECURITY_SCAN_ISSUE"
-    echo "$JIRA_SECURITY_SCAN_ISSUE" > "$JIRA_ISSUES_FILE"
-    log_success "✅ Using security scan issue: $JIRA_SECURITY_SCAN_ISSUE"
+detect_subtask "Security Vulnerability Scan"
+
+# Extraer información del resultado (results.json)
+if [[ -f "results.json" ]]; then
+    CRITICALS=$(jq -r '.VulnerabilitySeverities.Critical' results.json)
+    HIGHS=$(jq -r '.VulnerabilitySeverities.High' results.json)
+    MEDIUMS=$(jq -r '.VulnerabilitySeverities.Medium' results.json)
+    LOWS=$(jq -r '.VulnerabilitySeverities.Low' results.json)
 else
-    # Si no está definida, detectar automáticamente
-    detect_security_scan_subtask "auto"
+  CRITICALS=0
+  HIGHS=0
+  MEDIUMS=0
+  LOWS=0
 fi
 
-# 2. Crear comentario con resultados de Tenable
-TENABLE_COMMENT="## 🛡️ Tenable Security Scan - COMPLETED ✅\n\n
-**Application:** ${APP_NAME}\n
-**Image Tag:** ${IMAGE_TAG}\n
-**Scan Date:** $(date)\n
-**Target:** ${TAR_FILE} ($(du -h $TAR_FILE | cut -f1))\n\n
-**Status:** ✅ **PASSED** - No critical vulnerabilities\n\n
-The security scan has been completed successfully.\n\n
----\n
-*Automated security scan by CI/CD Pipeline*"
+# Determinar estado general
+if (( CRITICALS > 0 )); then
+  STATUS="❌ FAILED - Critical vulnerabilities detected"
+elif (( HIGHS > 0 || MEDIUMS > 0 )); then
+  STATUS="⚠️ WARNINGS - Medium or High vulnerabilities found"
+else
+  STATUS="✅ PASSED - No critical vulnerabilities"
+fi
 
-create_jira_comments "$TENABLE_COMMENT"
+# Incluir en el comentario
+TENABLE_COMMENT="Tenable Security Scan - COMPLETED
+Application: ${APP_NAME}
+Image Tag: ${IMAGE_TAG}
+Scan Date: $(date)
+Target: ${TAR_FILE} ($(du -h "$TAR_FILE" | cut -f1))
+Status: ${STATUS}
+Findings Summary:
+  Critical: ${CRITICALS}
+  High:     ${HIGHS}
+  Medium:   ${MEDIUMS}
+  Low:      ${LOWS}
+The security scan has been completed successfully."
 
-# 3. Publicar comentarios en JIRA
+SAFE_COMMENT=$(echo "$TENABLE_COMMENT" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+create_jira_comments "$SAFE_COMMENT"
+
 post_jira_comments
 
 log_duration "Tenable security scan with JIRA integration"

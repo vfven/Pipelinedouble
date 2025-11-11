@@ -7,10 +7,10 @@
 set -Eeuo pipefail
 
 # Load utilities
-UTILS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../utils" && pwd)"
-source "$UTILS_DIR/logging.sh"
-source "$UTILS_DIR/error-handling.sh"
-source "$UTILS_DIR/utils.sh"
+UTILS_DIR="$(cd "/opt/atlassian/pipelines/agent/build/infra-cicd-tools/scripts/" && pwd)"
+source "$UTILS_DIR/utils/logging.sh"
+source "$UTILS_DIR/utils/error-handling.sh"
+source "$UTILS_DIR/utils/utils.sh"
 
 # Initialize
 init_utilities

@@ -1,0 +1,332 @@
+# app-source-code/bitbucket-pipelines.yml
+image: atlassian/default-image:3
+
+# =============================================================================
+# DEFINICIONES GLOBALES, CACHES Y ANCHORS
+# =============================================================================
+definitions:
+  services:
+    docker:
+      memory: 2048
+  
+  # Uso de cache para el submódulo 'infra-cicd-tools' (optimización principal)
+  caches:
+    submodule: infra-cicd-tools
+  
+  # Variables específicas de la aplicación
+  variables:
+    - name: APP_NAME
+      value: "mi-aplicacion"
+    - name: APP_PORT
+      value: "3000"
+    - name: DEFAULT_ENV
+      value: "main"
+    - name: DEFAULT_IMAGE_TAG
+      value: "${BITBUCKET_BUILD_NUMBER}"
+
+  yaml-anchors:
+    # ========================================================================
+    # 1. ANCHORS DE INICIALIZACIÓN Y VARIABLES (Optimizados)
+    # ========================================================================
+    # Inicializa el submódulo usando CACHE en lugar de Artifacts
+    - &init-submodule
+        name: "Initialize Submodule with Cache"
+        caches:
+          - submodule
+        script:
+          - echo "📦 Inicializando submódulo y usando caché..."
+          - git submodule update --init --recursive --remote --force
+          - echo "✅ Submódulo inicializado correctamente"
+
+    # Carga variables de entorno personalizadas
+    - &load-env-vars
+        name: "Load Environment Variables"
+        script:
+          - echo "📦 Cargando variables personalizadas del .env"
+          - chmod +x infra-cicd-tools/scripts/utils/load-env.sh
+          - ./infra-cicd-tools/scripts/utils/load-env.sh "${ENVIRONMENT:-development}"
+        artifacts:
+          - export_vars.sh
+
+    # SUPER-ANCHOR: Aplica permisos a todos los scripts y hace source (Optimización)
+    - &super-init
+        name: "Apply Permissions and Load Vars"
+        script:
+          - echo "🔧 Configurando permisos de ejecución y cargando variables..."
+          - chmod +x infra-cicd-tools/scripts/**/*.sh
+          - source export_vars.sh
+
+    # Get Hashicorp Value (Limpiado de source/chmod)
+    - &hashicorp-value
+        name: "Get Secret"
+        script:
+          - infra-cicd-tools/scripts/security/hashicorp-vars.sh 2>&1 | tee hashicorp.log
+        artifacts: 
+          - secret.enc
+          - hashicorp.log
+
+    - &comment-jira
+        name: "Comment Jira"
+        script:
+          - source export_vars.sh
+          - chmod +x infra-cicd-tools/scripts/jira/*.sh
+          - |
+            exec > >(tee comment-jira.log) 2>&1
+            infra-cicd-tools/scripts/jira/detect-jira-keys.sh
+        on-fail:
+          strategy: ignore
+        artifacts: 
+          - comment-jira.log
+
+    # ========================================================================
+    # 2. ENVIRONMENT SETUP (Limpiados de source/chmod)
+    # ========================================================================
+
+    - &setup-dev-environment
+        name: "Setup Dev Environment"
+        script:
+          - echo "--- Configurando entorno DEVELOPMENT ---"
+          - export $(cat custom-vars.env | xargs)
+          - export ENVIRONMENT="${DEV_ENVIRONMENT:-development}"
+          - export IMAGE_TAG="${DEV_IMAGE_TAG:-${BITBUCKET_BUILD_NUMBER}}"
+          - export K8S_NAMESPACE="${DEV_K8S_NAMESPACE:-dev-namespace}"
+          - export KUBE_CONTEXT="${RANCHER_KUBE_CONTEXT:-rancher-desktop}"
+          - infra-cicd-tools/scripts/utils/setup.sh
+
+    - &setup-prod-environment
+        name: "Setup Prod Environment"
+        script:
+          - echo "--- Configurando entorno PRODUCTION ---"
+          - export $(cat custom-vars.env | xargs)
+          - export ENVIRONMENT="${PROD_ENVIRONMENT:-production}"
+          - export IMAGE_TAG="${PROD_IMAGE_TAG:-${BITBUCKET_BUILD_NUMBER}}"
+          - export K8S_NAMESPACE="${PROD_K8S_NAMESPACE:-prod-namespace}"
+          - export AWS_REGION="${EKS_AWS_REGION:-us-east-1}"
+          - export EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-my-eks-cluster}"
+          - infra-cicd-tools/scripts/utils/setup.sh
+
+    # ========================================================================
+    # 3. DOCKER & K8S/EKS (Limpiados de source/chmod)
+    # ========================================================================
+
+    - &build-docker-image
+        name: "Build Docker Image"
+        services:
+          - docker
+        script:
+          - infra-cicd-tools/scripts/docker/build-image.sh 2>&1 | tee build-docker-image.log
+        artifacts: 
+          - docker.tar
+          - build-docker-image.log
+
+    - &push-to-ecr
+        name: "Push to ECR"
+        image: cbytedigital/aws-cli-jq
+        services:
+          - docker
+        script:
+          - docker load -i docker.tar
+          - infra-cicd-tools/scripts/docker/push-to-ecr.sh 2>&1 | tee push-to-ecr.log
+        on-fail:
+          strategy: ignore
+        artifacts: 
+          - push-to-ecr.log
+
+    # ANCHOR FALTANTE: Generate Manifests
+    - &generate-k8s-manifests
+        name: "Generate K8s Manifests"
+        script:
+          - infra-cicd-tools/scripts/kubernetes/generate-manifests.sh 2>&1 | tee generate-k8s-manifests.log
+        on-fail:
+          strategy: ignore
+        artifacts: 
+          - generate-k8s-manifests.log
+          - kubernetes-manifests/**
+
+    # ANCHOR FALTANTE: Deploy to Rancher
+    - &deploy-to-rancher
+        name: "Deploy to Rancher"
+        script:
+          - infra-cicd-tools/scripts/kubernetes/deploy-to-rancher.sh "$APP_NAME" "$ENVIRONMENT" "$IMAGE_TAG" 2>&1 | tee deploy-to-rancher.log
+        on-fail:
+          strategy: ignore
+        artifacts: 
+          - deploy-to-rancher.log
+
+    - &deploy-to-eks
+        name: "Deploy to EKS"
+        script:
+          - infra-cicd-tools/scripts/kubernetes/deploy-to-eks.sh "$APP_NAME" "$ENVIRONMENT" "$IMAGE_TAG" 2>&1 | tee deploy-to-eks.log
+        artifacts: 
+          - deploy-to-eks.log
+
+    # ========================================================================
+    # 4. SECURITY & JIRA (Limpiados de source/chmod)
+    # ========================================================================
+
+    - &tenable-scan-image
+        name: "Tenable Scan Image"
+        services:
+          - docker
+        script:
+          - docker load -i docker.tar 
+          - infra-cicd-tools/scripts/security/tenable-scan.sh 2>&1 | tee tenable-scan.log
+        artifacts: 
+          - tenable-scan.log
+        
+    # ========================================================================
+    # 5. NOTIFICATIONS (Limpiados de redundancia de logs)
+    # ========================================================================
+
+    - &notify-success
+        name: "Notify Success"
+        script:
+          - echo "✅ Operation completed successfully!"
+          - echo "Application= ${APP_NAME}"
+          - echo "Environment= ${ENVIRONMENT}"
+          - echo "Image Tag= ${IMAGE_TAG}"
+    - &jira-diagnostic
+        name: "JIRA diagnosic"
+        script:
+          - ./infra-cicd-tools/scripts/jira/jira-diagnostic.sh
+        artifacts: 
+          - comment-jira
+
+    - &jira-automation
+        name: "🎯 JIRA DevOps Automation"
+        script:
+            - source export_vars.sh
+            - chmod +x infra-cicd-tools/scripts/jira/*.sh
+            - ./infra-cicd-tools/scripts/jira/devops-automation.sh
+        artifacts: 
+          - comment-jira
+
+# (Los anchors de logs y notificación complejos se mantienen, ya que están bien definidos)
+
+
+# =============================================================================
+# PIPELINES PARA LA APLICACIÓN - CON ARTEFACTOS
+# =============================================================================
+pipelines:
+  branches:
+    develop:
+      - step: *init-submodule
+      - step: *load-env-vars
+      - step: *super-init # <--- Inicialización centralizada
+      - step: *hashicorp-value
+      - step: *setup-dev-environment
+      - step: *build-docker-image
+      - step: *tenable-scan-image
+      - step: *jira-diagnostic
+      - step: *generate-k8s-manifests # <--- Recuperado
+      - step: *deploy-to-rancher # <--- Recuperado
+      - step: *notify-success # <--- Agregar notificación
+
+    main:
+      - step: *init-submodule
+      - step: *load-env-vars
+      - step: *super-init # <--- Inicialización centralizada
+      - step: *setup-prod-environment
+      - step: *build-docker-image
+      - step: *push-to-ecr
+      - step: *generate-k8s-manifests
+      - step: *deploy-to-eks
+      - step:
+          name: "Comment on JIRA"
+          script:
+            - export JIRA_ISSUE_KEY=$(infra-cicd-tools/scripts/jira/detect-jira-keys.sh || echo "PROJ-123")
+            - export JIRA_COMMENT="Deployed to production successfully! Build ${BITBUCKET_BUILD_NUMBER}"
+            - infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
+      - step: *notify-success
+
+  custom:
+    docker-build:
+      - variables:
+          - name: APP_NAME
+            value: "mi-aplicacion"
+          - name: IMAGE_TAG
+            value: "latest"
+      - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
+      - step: *load-env-vars
+      - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
+      - step: *build-docker-image       # ← Recibe el artefacto automáticamente
+
+    docker-ecr:
+      - variables:
+          - name: APP_NAME
+            value: "mi-aplicacion"
+          - name: IMAGE_TAG
+            value: "${BITBUCKET_BUILD_NUMBER}"
+      - step: *init-submodule
+      - step: *load-env-vars
+      - step: *super-init
+      - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
+      - step: *build-docker-image       # ← Recibe el artefacto automáticamente
+      - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
+
+    jira-comment:
+      - variables:
+          - name: JIRA_ISSUE_KEY
+            value: "PROJ-123"
+          - name: JIRA_COMMENT
+            value: "Comentario automático desde Bitbucket Pipeline"
+      - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
+      - step: *load-env-vars
+      - step: *comment-jira
+      #- step: *comment-jira
+      #- step:
+      #    name: "Comment on JIRA"
+      #    script:
+      #      - chmod +x infra-cicd-tools/scripts/jira/comment-jira.sh
+      #      - infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
+      
+    jira-automation-devops:
+      - variables:
+          - name: JIRA_PROJECT_KEY
+            value: "DEVOPS"
+          - name: REPO_NAME
+            value: "gfb_repodeprueba"
+      - step: *init-submodule
+      - step: *load-env-vars
+      #- step: *jira-automation
+
+    debug-environment:
+      - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
+      - step: *load-env-vars
+      - step:
+          name: "Debug Environment"
+          script:
+            - echo "=== DEBUG INFORMATION ==="
+            - echo "Bitbucket Variables:"
+            - echo "BITBUCKET_BUILD_NUMBER = ${BITBUCKET_BUILD_NUMBER}"
+            - echo "BITBUCKET_COMMIT = ${BITBUCKET_COMMIT}"
+            - echo "BITBUCKET_BRANCH = ${BITBUCKET_BRANCH}"
+            - echo "Application Variables:"
+            - echo "APP_NAME = $APP_NAME"
+            - echo "APP_PORT = $APP_PORT"
+            - echo "Submodule Content (via artefacto):"
+            - ls -la infra-cicd-tools/scripts/
+            - echo "=== DEBUG COMPLETED ==="
+
+    full-pipeline:
+      - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
+      - step: *setup-prod-environment   # ← Recibe el artefacto automáticamente
+      #- step: *detect-jira-keys         # ← Recibe el artefacto automáticamente
+      - step: *build-docker-image       # ← Recibe el artefacto automáticamente
+      - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
+      - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
+      - step: *deploy-to-eks            # ← Recibe el artefacto automáticamente
+      - step:
+          name: "Comment on JIRA"
+          script:
+            - export JIRA_ISSUE_KEY=$(infra-cicd-tools/scripts/jira/detect-jira-keys.sh || echo "PROJ-123")
+            - export JIRA_COMMENT="Full pipeline completed successfully! Build ${BITBUCKET_BUILD_NUMBER}"
+            - chmod +x infra-cicd-tools/scripts/jira/comment-jira.sh
+            - infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
+      - step: *notify-success           # ← Recibe el artefacto automáticamente
+
+    debug:
+      - step: *init-submodule           # ← SOLO UNA VEZ con artefacto
+      - step: *load-env-vars            # ← Recibe el artefacto automáticamente
+      - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
+      - step: *jira-diagnostic

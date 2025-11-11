@@ -194,56 +194,46 @@ assign_subtask_to_release() {
 # Main function - VERSIÓN SIMPLIFICADA Y EFECTIVA
 detect_subtask() {
     local subtask_name="$1"
-    local search_strategy="${2:-auto}"  # auto, release, project, direct
-    
     local project_key="${JIRA_PROJECT_KEY:-DV}"
-    local app_version="${APP_VERSION:-1.0.0}"
-    local repo_name="${REPO_NAME:-app-source-code}"
-    local release_name="$repo_name v$app_version"
-    
-    log_step "DETECT" "Detecting: '$subtask_name'"
-    log_info "Project: $project_key, Release: $release_name"
-    log_info "Strategy: $search_strategy"
-    
-    local subtask_key=""
-    
-    case "$search_strategy" in
-        "release")
-            # Solo buscar en release
-            if search_result=$(search_jira_issues "project = \"$project_key\" AND fixVersion = \"$release_name\" AND issuetype = Sub-task" "key,summary" 10); then
-                local total=$(echo "$search_result" | jq -r '.total // 0')
-                if [ "$total" -gt 0 ]; then
-                    subtask_key=$(echo "$search_result" | jq -r '.issues[0].key')
-                fi
-            fi
-            ;;
-        "direct")
-            # Usar DV-430 directamente
-            subtask_key="DV-430"
-            ;;
-        "auto"|*)
-            # Búsqueda inteligente
-            subtask_key=$(find_subtask_in_release_or_project "$subtask_name" "$project_key" "$release_name")
-            ;;
-    esac
-    
-    if [[ -n "$subtask_key" ]]; then
-        # Verificar si está en el release, si no, asignarla
-        local jql_check="key = \"$subtask_key\" AND fixVersion = \"$release_name\""
-        if check_result=$(search_jira_issues "$jql_check" "key" 1); then
-            local in_release=$(echo "$check_result" | jq -r '.total // 0')
-            if [ "$in_release" -eq 0 ]; then
-                log_warning "⚠️  Subtask $subtask_key is not in release, assigning..."
-                assign_subtask_to_release "$subtask_key" "$release_name"
-            fi
-        fi
-        
-        echo "$subtask_key" > "$JIRA_ISSUES_FILE"
-        log_success "✅ Subtask detected: $subtask_key"
-        echo "$subtask_key"
+    local release_name="${REPO_NAME:-app-source-code} v${APP_VERSION:-1.0.0}"
+    local issues_file="${JIRA_ISSUES_FILE:-jira-issues.txt}"
+
+    log_step "DETECT" "Finding: '$subtask_name'"
+    log_info "Project: $project_key"
+    log_info "Release: $release_name"
+    log_info "Searching for subtask by direct JQL and text match"
+
+    local jql_query="project = \"$project_key\" AND fixVersion = \"$release_name\" AND issuetype = Sub-task"
+    local encoded_jql
+    encoded_jql=$(echo "$jql_query" | jq -s -R -r @uri)
+
+    local json
+    json=$(curl -s -u "$JIRA_USERNAME:$JIRA_API_TOKEN" \
+      -X GET \
+      "$JIRA_BASE_URL/rest/api/3/search/jql?jql=$encoded_jql&maxResults=100&fields=key,summary" \
+      | jq -r '.issues[] | "\(.key) - \(.fields.summary)"')
+
+    if [[ -z "$json" ]]; then
+        log_error "❌ No issues returned from JIRA"
+        return 1
+    fi
+
+    # Buscar coincidencia textual exacta o parcial (case-insensitive)
+    local match
+    match=$(echo "$json" | grep -i "$subtask_name" | head -n 1)
+
+    if [[ -n "$match" ]]; then
+        local key
+        key=$(echo "$match" | awk '{print $1}')
+        log_success "✅ Found: $key - $match"
+        echo "$key" > "$issues_file"
+        echo "$key"
         return 0
     else
-        log_error "❌ Could not find subtask: '$subtask_name'"
+        log_error "❌ Subtask '$subtask_name' not found in list"
+        echo "$json" | head -n 10 | while read -r line; do
+            log_info "  ↳ $line"
+        done
         return 1
     fi
 }
@@ -252,13 +242,30 @@ detect_subtask() {
 # Convenience functions
 # =============================================================================
 
-detect_security_scan_subtask() {
+#detect_security_scan_subtask() {
     # Usar estrategia "direct" ya que sabemos que DV-430 existe
-    detect_subtask "Security Vulnerability Scan" "direct"
+#    detect_subtask "Security Vulnerability Scan" "direct"
+#}
+
+#detect_build_application_subtask() {
+#    detect_subtask "Build Application" "auto"
+#}
+
+detect_security_scan_subtask() {
+    detect_subtask "Security Vulnerability Scan" "${1:-auto}"
 }
 
+detect_docker_build_subtask() {
+    detect_subtask "Build Docker Image" "${1:-auto}"
+}
+
+detect_ecr_push_subtask() {
+    detect_subtask "Push to Container Registry" "${1:-auto}"
+}
+
+# Opcional: si también tienes esta
 detect_build_application_subtask() {
-    detect_subtask "Build Application" "auto"
+    detect_subtask "Build Application" "${1:-auto}"
 }
 
 # ... (mantener el resto de las funciones igual)
@@ -311,7 +318,6 @@ create_jira_comments() {
     comment_content+="\n\n---\n*Automated message from CI/CD Pipeline*"
     echo "$comment_content" > "$comment_file"
     log_success "JIRA comment created: $comment_file"
-    echo "$comment_file"
 }
 
 post_jira_comments() {
@@ -342,7 +348,6 @@ post_jira_comments() {
     while IFS= read -r issue_key; do
         if [[ -n "$issue_key" ]]; then
             log_info "Posting comment to JIRA issue: $issue_key"
-            echo $UTILS_DIR
             if "$UTILS_DIR/jira/comment-jira.sh" "$issue_key" "$comment"; then
                 log_success "✅ Comment posted to $issue_key"
                 ((success_count++))
