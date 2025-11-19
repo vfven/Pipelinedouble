@@ -14,7 +14,9 @@ source "$UTILS_DIR/utils/utils.sh"
 source "$UTILS_DIR/jira/jira-comment-utils.sh"
 source "$UTILS_DIR/security/hashicorp-vars.sh"
 
-# Initialize
+# Inicializar logging y manejo de errores
+init_logging
+init_error_handling
 init_utilities
 start_timer
 

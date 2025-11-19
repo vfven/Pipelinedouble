@@ -7,10 +7,16 @@
 set -euo pipefail
 
 # === Importar librerías comunes ===
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/logging.sh"
-source "$SCRIPT_DIR/error-handling.sh"
-source "$SCRIPT_DIR/utils.sh"
+UTILS_DIR="$(cd "/opt/atlassian/pipelines/agent/build/infra-cicd-tools/scripts/" && pwd)"
+source "$UTILS_DIR/utils/logging.sh"
+source "$UTILS_DIR/utils/error-handling.sh"
+source "$UTILS_DIR/utils/utils.sh"
+
+# Inicializar logging y manejo de errores
+init_logging
+init_error_handling
+init_utilities
+start_timer
 
 # === Variables iniciales ===
 ENVIRONMENT=${1:-development}

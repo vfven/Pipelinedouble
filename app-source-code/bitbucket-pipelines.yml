@@ -70,6 +70,7 @@ definitions:
           - echo "   KUBE_CONTEXT=$KUBE_CONTEXT"
           - chmod +x infra-cicd-tools/scripts/utils/setup.sh
           - infra-cicd-tools/scripts/utils/setup.sh
+          - pwd
 
 
     # Anchor para setup de producción (SIN submodule update)
@@ -93,6 +94,7 @@ definitions:
           - echo "   EKS_CLUSTER_NAME=$EKS_CLUSTER_NAME"
           - chmod +x infra-cicd-tools/scripts/utils/setup.sh
           - infra-cicd-tools/scripts/utils/setup.sh
+          - pwd
 
     # ========================================================================
     # DOCKER IMAGE
@@ -139,17 +141,22 @@ definitions:
     # Anchor para generar manifiestos Kubernetes (SIN submodule update)
     - &generate-k8s-manifests
         name: "Generate K8s Manifests"
+        services:
+          - docker
         script:
           - source export_vars.sh
+          - echo "📦 Instalando Kustomize..."
+          - curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          - mv kustomize /usr/local/bin/
+          - chmod +x /usr/local/bin/kustomize
+          - kustomize version
           - chmod +x infra-cicd-tools/scripts/kubernetes/generate-manifests.sh
-          - |
-            exec > >(tee generate-k8s-manifests.log) 2>&1
-            infra-cicd-tools/scripts/kubernetes/generate-manifests.sh
-        on-fail:
-          strategy: ignore
-        artifacts: 
+          - AUTO_DEPLOY=false
+          - ls -lrt ./infra-cicd-tools/scripts/kubernetes/generate-manifests.sh
+          - ./infra-cicd-tools/scripts/kubernetes/generate-manifests.sh 2>&1 | tee generate-k8s-manifests.log
+        artifacts:
           - generate-k8s-manifests.log
-          - kubernetes-manifests/**
+          - kubernetes/overlays/*
 
     # Anchor para deploy a Rancher (SIN submodule update)
     - &deploy-to-rancher
@@ -392,6 +399,34 @@ definitions:
               "https://bancobase.atlassian.net/rest/api/issue/JD-179/attachments"
           - echo "Se agrega log a issue"
 
+    # ========================================================================
+    # ANCHOR: Commit Artifacts to Repo
+    # ========================================================================
+    - &commit-artifacts
+        name: "Commit and Push Generated Artifacts"
+        script:
+          - echo "🔧 Configurando Git para commit automático..."
+          - |
+            AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
+            AUTHOR_EMAIL=$(git log -1 --pretty=format:'%ae')
+
+            git config --global user.name "${AUTHOR_NAME:-Bitbucket Pipelines}"
+            git config --global user.email "${AUTHOR_EMAIL:-ci@bancobase.com}"
+
+          - echo "📦 Preparando directorio de manifiestos..."
+          - mkdir -p kubernetes/generated
+          - cp -R kubernetes/overlays/* kubernetes/generated/ || echo "No se encontraron manifiestos para copiar."
+
+          - echo "📝 Commit de manifiestos generados..."
+          - git add kubernetes/generated/ || true
+          - git commit -m "🤖 Auto-generated K8s manifests for auto" || echo "Nada que commitear."
+          
+          - echo "🚀 Haciendo push al mismo repositorio..."
+          - git push "https://x-token-auth:${BITBUCKET_TOKEN}@bitbucket.org/${BITBUCKET_REPO_FULL_NAME}.git" HEAD:${BITBUCKET_BRANCH} || echo "⚠️ No se pudo hacer push (posible política protegida de rama)."
+
+        artifacts:
+          - kubernetes/generated/**
+
 # =============================================================================
 # PIPELINES PARA LA APLICACIÓN - CON ARTEFACTOS
 # =============================================================================
@@ -402,13 +437,14 @@ pipelines:
       - step: *load-env-vars            # ← Recibe el artefacto automáticamente
       - step: *hashicorp-value          # ← Recibe el artefacto automáticamente
       - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
-      - step: *build-docker-image       # ← Recibe el artefacto automáticamente
-      - step: *tenable-scan-image       # ← Recibe el artefacto automáticamente
-      - step: *jira-diagnostic
+      #- step: *build-docker-image       # ← Recibe el artefacto automáticamente
+      #- step: *tenable-scan-image       # ← Recibe el artefacto automáticamente
+      #- step: *jira-diagnostic          # ← Valida los valores en jira
       #- step: *push-to-ecr              # ← Recibe el artefacto automáticamente
-      #- step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
+      - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
+      #- step: *commit-artifacts
       #- step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
-      #- step: *comment-jira
+      - step: *comment-jira
       #- step: *notify
       #- step: 
       #    <<: *collect-logs
