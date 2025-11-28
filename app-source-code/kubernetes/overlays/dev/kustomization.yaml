@@ -1,0 +1,144 @@
+apiVersion: v1
+data:
+  API_URL: null
+  APP_ENV: dev
+  LOG_LEVEL: null
+kind: ConfigMap
+metadata:
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase-config
+  namespace: dev-namespace
+---
+apiVersion: v1
+data:
+  DB_PASSWORD: null
+  DB_USER: null
+kind: Secret
+metadata:
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase-secrets
+  namespace: dev-namespace
+type: Opaque
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase-svc
+  namespace: dev-namespace
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+  selector:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase
+  namespace: dev-namespace
+spec:
+  replicas: null
+  selector:
+    matchLabels:
+      app: hola-mundobase
+      environment: dev
+      managed-by: devops
+  template:
+    metadata:
+      labels:
+        app: hola-mundobase
+        environment: dev
+        managed-by: devops
+        version: latest
+    spec:
+      containers:
+      - envFrom:
+        - configMapRef:
+            name: hola-mundobase-config
+        - secretRef:
+            name: hola-mundobase-secrets
+        image: :latest
+        imagePullPolicy: Always
+        name: hola-mundobase
+        ports:
+        - containerPort: 3000
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+      restartPolicy: Always
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase-hpa
+  namespace: dev-namespace
+spec:
+  maxReplicas: null
+  metrics:
+  - resource:
+      name: cpu
+      target:
+        averageUtilization: 70
+        type: Utilization
+    type: Resource
+  minReplicas: null
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hola-mundobase
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase-ingress
+  namespace: dev-namespace
+spec:
+  rules:
+  - host: hola-mundobase.example.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: hola-mundobase-svc
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - hola-mundobase.example.com
+    secretName: null

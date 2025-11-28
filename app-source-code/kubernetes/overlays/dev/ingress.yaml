@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase-ingress
+  namespace: dev-namespace
+spec:
+  rules:
+  - host: hola-mundobase.example.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: hola-mundobase-svc
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - hola-mundobase.example.com
+    secretName: null

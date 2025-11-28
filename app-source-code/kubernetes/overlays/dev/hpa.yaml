@@ -1,0 +1,23 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase-hpa
+  namespace: dev-namespace
+spec:
+  maxReplicas: null
+  metrics:
+  - resource:
+      name: cpu
+      target:
+        averageUtilization: 70
+        type: Utilization
+    type: Resource
+  minReplicas: null
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hola-mundobase

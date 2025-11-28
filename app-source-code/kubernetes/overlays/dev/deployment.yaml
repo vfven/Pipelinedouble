@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: hola-mundobase
+    environment: dev
+    managed-by: devops
+  name: hola-mundobase
+  namespace: dev-namespace
+spec:
+  replicas: null
+  selector:
+    matchLabels:
+      app: hola-mundobase
+      environment: dev
+      managed-by: devops
+  template:
+    metadata:
+      labels:
+        app: hola-mundobase
+        environment: dev
+        managed-by: devops
+        version: latest
+    spec:
+      containers:
+      - envFrom:
+        - configMapRef:
+            name: hola-mundobase-config
+        - secretRef:
+            name: hola-mundobase-secrets
+        image: :latest
+        imagePullPolicy: Always
+        name: hola-mundobase
+        ports:
+        - containerPort: 3000
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+      restartPolicy: Always
