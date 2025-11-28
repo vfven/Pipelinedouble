@@ -124,7 +124,6 @@ wait_for_resource() {
 # Initialize utilities
 init_utilities() {
     init_logging
-    init_error_handling
     log_debug "Utilities system initialized"
 }
 

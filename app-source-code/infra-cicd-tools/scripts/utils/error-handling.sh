@@ -1,194 +1,257 @@
 #!/bin/bash
 
 # =============================================================================
-# Advanced Logging Utilities for CI/CD Scripts
+# Advanced Error Handling Utilities for CI/CD Scripts
 # =============================================================================
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-WHITE='\033[1;37m'
-NC='\033[0m' # No Color
+# Load logging utilities
+source infra-cicd-tools/scripts/utils/logging.sh
 
-# Log levels
-LOG_LEVEL_DEBUG="DEBUG"
-LOG_LEVEL_INFO="INFO"
-LOG_LEVEL_WARN="WARN"
-LOG_LEVEL_ERROR="ERROR"
-LOG_LEVEL="${LOG_LEVEL:-INFO}"
+# Error codes
+declare -A ERROR_CODES=(
+    ["VALIDATION_ERROR"]=10
+    ["CONFIG_ERROR"]=11
+    ["NETWORK_ERROR"]=12
+    ["PERMISSION_ERROR"]=13
+    ["RESOURCE_ERROR"]=14
+    ["TIMEOUT_ERROR"]=15
+    ["UNKNOWN_ERROR"]=99
+)
 
-# Timestamp function
-timestamp() {
-    date +"%Y-%m-%d %H:%M:%S.%3N"
-}
+# Trap signals
+set -Eeuo pipefail
 
-# Function to check if log level is enabled
-is_log_level_enabled() {
-    local level="$1"
-    declare -A level_weights=(
-        ["DEBUG"]=0
-        ["INFO"]=1
-        ["WARN"]=2
-        ["ERROR"]=3
-    )
+# Error handler function
+error_handler() {
+    local exit_code=$?
+    local line_number=$1
+    local command_name=$2
+    local error_message="${3:-Unknown error}"
     
-    local current_weight=${level_weights[$LOG_LEVEL]}
-    local message_weight=${level_weights[$level]}
+    log_error "Script failed!"
+    log_error "Exit code: $exit_code"
+    log_error "Line number: $line_number"
+    log_error "Command: $command_name"
+    log_error "Message: $error_message"
     
-    [ $message_weight -ge $current_weight ]
-}
-
-# Debug logging
-log_debug() {
-    if is_log_level_enabled "DEBUG"; then
-        echo -e "${CYAN}[$(timestamp)] [DEBUG]${NC} $1" >&2
+    # Additional debug info
+    if [ "$LOG_LEVEL" = "DEBUG" ]; then
+        log_error "Stack trace:"
+        local frame=0
+        while caller $frame; do
+            ((frame++))
+        done
     fi
-}
-
-# Info logging
-log_info() {
-    if is_log_level_enabled "INFO"; then
-        echo -e "${BLUE}[$(timestamp)] [INFO]${NC} $1" >&2
-    fi
-}
-
-# Success logging
-log_success() {
-    if is_log_level_enabled "INFO"; then
-        echo -e "${GREEN}[$(timestamp)] [SUCCESS]${NC} $1" >&2
-    fi
-}
-
-# Warning logging
-log_warning() {
-    if is_log_level_enabled "WARN"; then
-        echo -e "${YELLOW}[$(timestamp)] [WARN]${NC} $1" >&2
-    fi
-}
-
-# Error logging
-log_error() {
-    if is_log_level_enabled "ERROR"; then
-        echo -e "${RED}[$(timestamp)] [ERROR]${NC} $1" >&2
-    fi
-}
-
-# Section header
-log_section() {
-    local section_name="$1"
-    echo -e "${MAGENTA}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║                     $section_name                     ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-# Subsection header
-log_subsection() {
-    local subsection_name="$1"
-    echo -e "${CYAN}"
-    echo "════════════════════════════════════════════════════════════"
-    echo "  $subsection_name"
-    echo "════════════════════════════════════════════════════════════"
-    echo -e "${NC}"
-}
-
-# Step logging
-log_step() {
-    local step_number="$1"
-    local step_description="$2"
-    echo -e "${WHITE}Step $step_number: ${step_description}${NC}"
-}
-
-# Command logging with execution
-log_command() {
-    local command="$1"
-    log_debug "Executing: $command"
-    eval "$command"
-}
-
-# Duration logging
-start_timer() {
-    export START_TIME=$(date +%s)
-}
-
-log_duration() {
-    local operation_name="$1"
-    local end_time=$(date +%s)
-    local duration=$((end_time - START_TIME))
     
-    if [ $duration -ge 60 ]; then
-        local minutes=$((duration / 60))
-        local seconds=$((duration % 60))
-        log_info "$operation_name completed in ${minutes}m ${seconds}s"
-    else
-        log_info "$operation_name completed in ${duration}s"
+    exit $exit_code
+}
+
+# Set trap for errors
+set_error_trap() {
+    trap 'error_handler ${LINENO} "${BASH_COMMAND}" "${BASH_SOURCE[0]}"' ERR
+    trap 'cleanup_on_exit' EXIT
+    log_debug "Error trap set"
+}
+
+# Cleanup function
+cleanup_on_exit() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        log_warning "Performing cleanup due to error exit"
+        # Add cleanup operations here
     fi
 }
 
-# JSON logging for machine parsing
-log_json() {
-    local level="$1"
-    local message="$2"
-    local additional_fields="$3"
+# Validation functions
+validate_not_empty() {
+    local variable_name="$1"
+    local variable_value="${!variable_name:-}"
     
-    if [ "$LOG_FORMAT" = "json" ]; then
-        local log_entry="{\"timestamp\":\"$(timestamp)\",\"level\":\"$level\",\"message\":\"$message\""
+    if [ -z "$variable_value" ]; then
+        throw_error "VALIDATION_ERROR" "Variable $variable_name cannot be empty"
+    fi
+}
+
+validate_file_exists() {
+    local file_path="$1"
+    local error_message="${2:-File not found: $file_path}"
+    
+    if [ ! -f "$file_path" ]; then
+        throw_error "RESOURCE_ERROR" "$error_message"
+    fi
+}
+
+validate_directory_exists() {
+    local dir_path="$1"
+    local error_message="${2:-Directory not found: $dir_path}"
+    
+    if [ ! -d "$dir_path" ]; then
+        throw_error "RESOURCE_ERROR" "$error_message"
+    fi
+}
+
+validate_command_exists() {
+    local command_name="$1"
+    
+    if ! command -v "$command_name" &> /dev/null; then
+        throw_error "RESOURCE_ERROR" "Command not found: $command_name"
+    fi
+}
+
+# Throw error with specific code
+throw_error() {
+    local error_type="$1"
+    local error_message="$2"
+    local exit_code=${ERROR_CODES[$error_type]:-99}
+    
+    log_error "ERROR [$error_type]: $error_message"
+    exit $exit_code
+}
+
+# Retry function with exponential backoff
+retry() {
+    local max_attempts="$1"
+    local delay="$2"
+    local command="$3"
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        log_info "Attempt $attempt/$max_attempts: $command"
         
-        if [ -n "$additional_fields" ]; then
-            log_entry="$log_entry,$additional_fields"
+        if eval "$command"; then
+            log_success "Command succeeded on attempt $attempt"
+            return 0
         fi
         
-        log_entry="$log_entry}"
-        echo "$log_entry"
+        local wait_time=$((delay * (2 ** (attempt-1))))
+        log_warning "Command failed. Retrying in ${wait_time}s..."
+        sleep $wait_time
+        ((attempt++))
+    done
+    
+    throw_error "NETWORK_ERROR" "Command failed after $max_attempts attempts: $command"
+}
+
+# Timeout function
+with_timeout() {
+    local timeout_seconds="$1"
+    local command="$2"
+    
+    log_debug "Executing with timeout: ${timeout_seconds}s"
+    
+    if timeout $timeout_seconds bash -c "$command"; then
+        return 0
     else
-        case "$level" in
-            "DEBUG") log_debug "$message" ;;
-            "INFO") log_info "$message" ;;
-            "WARN") log_warning "$message" ;;
-            "ERROR") log_error "$message" ;;
-            *) log_info "$message" ;;
-        esac
+        local exit_code=$?
+        if [ $exit_code -eq 124 ]; then
+            throw_error "TIMEOUT_ERROR" "Command timed out after ${timeout_seconds} seconds: $command"
+        else
+            return $exit_code
+        fi
     fi
 }
 
-# Log environment variables (masking secrets)
-log_environment() {
-    log_debug "Environment variables:"
-    env | grep -E -i '(app|aws|jira|docker|kube)' | \
-    while read -r line; do
-        local var_name=$(echo "$line" | cut -d'=' -f1)
-        local var_value=$(echo "$line" | cut -d'=' -f2-)
-        
-        # Mask sensitive values
-        case "$var_name" in
-            *KEY* | *TOKEN* | *SECRET* | *PASSWORD* | *ACCESS* | *PRIVATE*)
-                var_value="***MASKED***"
-                ;;
-            *)
-                # Show first 4 chars for non-sensitive values
-                if [ "${#var_value}" -gt 8 ]; then
-                    var_value="${var_value:0:4}***${var_value: -4}"
-                fi
-                ;;
-        esac
-        
-        log_debug "  $var_name=$var_value"
-    done
+# Safe command execution
+safe_exec() {
+    local command="$1"
+    local error_message="${2:-Command failed: $command}"
+    
+    log_debug "Executing safely: $command"
+    
+    if ! eval "$command"; then
+        throw_error "UNKNOWN_ERROR" "$error_message"
+    fi
 }
 
-# Initialize logging
-init_logging() {
-    log_debug "Logging system initialized"
-    log_debug "Log level: $LOG_LEVEL"
-    log_debug "Log format: ${LOG_FORMAT:-text}"
+# Check exit code and throw if non-zero
+check_exit_code() {
+    local exit_code=$?
+    local error_message="${1:-Command failed with exit code: $exit_code}"
+    
+    if [ $exit_code -ne 0 ]; then
+        throw_error "UNKNOWN_ERROR" "$error_message"
+    fi
+}
+
+# Validate required environment variables
+validate_required_vars() {
+    local missing_vars=()
+    
+    for var in "$@"; do
+        if [ -z "${!var:-}" ]; then
+            missing_vars+=("$var")
+        fi
+    done
+    
+    if [ ${#missing_vars[@]} -ne 0 ]; then
+        throw_error "CONFIG_ERROR" "Missing required variables: ${missing_vars[*]}"
+    fi
+}
+
+# Validate AWS configuration
+validate_aws_config() {
+    validate_required_vars AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
+    validate_command_exists aws
+    
+    log_info "Validating AWS credentials..."
+    if ! aws sts get-caller-identity > /dev/null 2>&1; then
+        throw_error "PERMISSION_ERROR" "AWS credentials are invalid or expired"
+    fi
+}
+
+# Validate Docker configuration
+validate_docker_config() {
+    validate_command_exists docker
+    
+    log_info "Validating Docker daemon..."
+    if ! docker info > /dev/null 2>&1; then
+        throw_error "RESOURCE_ERROR" "Docker daemon is not running or accessible"
+    fi
+}
+
+# Validate Kubernetes configuration
+validate_kube_config() {
+    validate_command_exists kubectl
+    
+    log_info "Validating Kubernetes connection..."
+    if ! kubectl cluster-info > /dev/null 2>&1; then
+        throw_error "RESOURCE_ERROR" "Kubernetes cluster is not accessible"
+    fi
+}
+
+# Function to send error notifications
+send_error_notification() {
+    local error_message="$1"
+    local context="${2:-CI/CD Pipeline}"
+    
+    log_error "Sending error notification: $error_message"
+    
+    # Example: Send to Slack
+    if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+        curl -s -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"❌ $context Error: $error_message\"}" \
+            "$SLACK_WEBHOOK_URL" || true
+    fi
+    
+    # Example: Send to JIRA
+    if [ -n "${JIRA_ISSUE_KEY:-}" ] && [ -n "${JIRA_API_TOKEN:-}" ]; then
+        local comment="{\"body\":\"CI/CD Pipeline failed: $error_message\"}"
+        curl -s -u "$JIRA_USERNAME:$JIRA_API_TOKEN" \
+            -X POST -H "Content-Type: application/json" \
+            -d "$comment" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$JIRA_ISSUE_KEY/comment" || true
+    fi
+}
+
+# Main error handling setup
+init_error_handling() {
+    set_error_trap
+    log_debug "Error handling system initialized"
 }
 
 # Export functions for use in other scripts
-export -f timestamp log_debug log_info log_success log_warning log_error
-export -f log_section log_subsection log_step log_command
-export -f start_timer log_duration log_json log_environment init_logging
+export -f set_error_trap validate_not_empty validate_file_exists
+export -f validate_directory_exists validate_command_exists throw_error
+export -f retry with_timeout safe_exec check_exit_code
+export -f validate_required_vars validate_aws_config validate_docker_config
+export -f validate_kube_config send_error_notification init_error_handling
