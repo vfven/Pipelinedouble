@@ -190,7 +190,7 @@ if [[ "${AUTO_DEPLOY:-false}" == "true" ]]; then
   kubectl apply -k "$OVERLAYS_DIR/$DEPLOY_ENV/"
   log_success "Despliegue aplicado exitosamente (${DEPLOY_ENV})"
 else
-  log_warn "AUTO_DEPLOY=false → Solo se generaron los manifiestos (sin aplicar)"
+  log_warn "AUTO_DEPLOY=false - Solo se generaron los manifiestos (sin aplicar)"
 fi
 
 # --- Copia de seguridad de variables (solo custom) ---

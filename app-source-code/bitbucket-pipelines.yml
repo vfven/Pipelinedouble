@@ -133,6 +133,7 @@ definitions:
           strategy: ignore
         artifacts: 
           - push-to-ecr.log
+          - ecr-push-info.txt
 
     # ========================================================================
     # K8S / EKS
@@ -145,18 +146,21 @@ definitions:
           - docker
         script:
           - source export_vars.sh
-          - echo "📦 Instalando Kustomize..."
+          - source ecr-push-info.txt
+          - echo "Instalando Kustomize..."
           - curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           - mv kustomize /usr/local/bin/
           - chmod +x /usr/local/bin/kustomize
           - kustomize version
           - chmod +x infra-cicd-tools/scripts/kubernetes/generate-manifests.sh
           - AUTO_DEPLOY=false
-          - ls -lrt ./infra-cicd-tools/scripts/kubernetes/generate-manifests.sh
           - ./infra-cicd-tools/scripts/kubernetes/generate-manifests.sh 2>&1 | tee generate-k8s-manifests.log
+          - ls -lRt /tmp/kubernetes/
+          - cat /tmp/kubernetes/overlays/dev/values.env
         artifacts:
           - generate-k8s-manifests.log
-          - kubernetes/overlays/*
+          - artifacts/**
+          - overlays/**
 
     # Anchor para deploy a Rancher (SIN submodule update)
     - &deploy-to-rancher
@@ -437,14 +441,14 @@ pipelines:
       - step: *load-env-vars            # ← Recibe el artefacto automáticamente
       - step: *hashicorp-value          # ← Recibe el artefacto automáticamente
       - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
-      #- step: *build-docker-image       # ← Recibe el artefacto automáticamente
-      #- step: *tenable-scan-image       # ← Recibe el artefacto automáticamente
+      - step: *build-docker-image       # ← Recibe el artefacto automáticamente
+      - step: *tenable-scan-image       # ← Recibe el artefacto automáticamente
       #- step: *jira-diagnostic          # ← Valida los valores en jira
-      #- step: *push-to-ecr              # ← Recibe el artefacto automáticamente
+      - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
       - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente
       #- step: *commit-artifacts
       #- step: *deploy-to-rancher        # ← Recibe el artefacto automáticamente
-      - step: *comment-jira
+      #- step: *comment-jira
       #- step: *notify
       #- step: 
       #    <<: *collect-logs
@@ -469,6 +473,27 @@ pipelines:
       - step: *notify-success           # ← Recibe el artefacto automáticamente
 
   custom:
+    deploy-with-environment:
+      - variables:
+        - name: ENVIRONMENT
+          default: "dev"
+          allowed-values:
+            - dev
+            - qa
+            - prod
+            - stage
+            - fix
+      - step: *init-submodule
+      - step: *load-env-vars
+      #- step: *hashicorp-value
+      #- step: *setup-dev-environment
+      #- step: *build-docker-image
+      #- step: *tenable-scan-image
+      #- step: *jira-diagnostic
+      #- step: *push-to-ecr
+      #- step: *generate-k8s-manifests
+      #- step: *commit-artifacts
+      #- step: *deploy-to-rancher
     docker-build:
       - variables:
           - name: APP_NAME
@@ -508,7 +533,7 @@ pipelines:
       #      - chmod +x infra-cicd-tools/scripts/jira/comment-jira.sh
       #      - infra-cicd-tools/scripts/jira/comment-jira.sh "$JIRA_ISSUE_KEY" "$JIRA_COMMENT"
       
-    jira-automation-devops:
+    jira-creation-subtask:
       - variables:
           - name: JIRA_PROJECT_KEY
             value: "DEVOPS"
