@@ -110,6 +110,7 @@ log_success "Archivo values.env generado: $VALUES_FILE"
 log_info "Variables cargadas: APP_NAME=$APP_NAME | ENVIRONMENT=${ENVIRONMENT:-$DEPLOY_ENV}"
 
 # =============================================================================
+# Imagen final para deployment
 # Cargar información de la imagen ECR
 # =============================================================================
 ECR_INFO_FILE="$BASE_DIR/ecr-push-info.txt"
@@ -127,9 +128,11 @@ fi
 if [[ -n "${ECR_IMAGE_URI:-}" ]]; then
     export IMAGE_FULL="$ECR_IMAGE_URI"
     log_info "Imagen final desde ECR: $IMAGE_FULL"
+    log_info "Imagen final desde ECR: $IMAGE_FULL"
 else
+    export IMAGE_FULL="${ECR_REPO_NAME}:${IMAGE_TAG}"
     export IMAGE_FULL="${ECR_REPO_NAME:-$APP_NAME}:${IMAGE_TAG:-latest}"
-    log_warning "⚠️ ECR_IMAGE_URI no encontrado, usando imagen local: $IMAGE_FULL"
+    log_warning "ECR_IMAGE_URI no encontrado, usando imagen local: $IMAGE_FULL"
 fi
 
 # =============================================================================
@@ -147,10 +150,30 @@ for f in $(find "$RENDER_DIR" -type f -name "*.yaml"); do
   mv "${f}.tmp" "$f"
 done
 
-log_success "✔ Variables sustituidas correctamente"
+log_success "Variables sustituidas correctamente"
 
 # =============================================================================
-# Generar archivo único -> luego dividirlo
+# Actualizar tag y repo dentro del kustomization.yaml
+# =============================================================================
+KUSTOM_FILE="$K8S_REPO_DIR/overlays/$DEPLOY_ENV/kustomization.yaml"
+
+if [[ ! -f "$KUSTOM_FILE" ]]; then
+    log_error "No existe $KUSTOM_FILE — no se puede actualizar la imagen."
+    exit 1
+fi
+
+log_info "Actualizando imagen en kustomization.yaml..."
+
+# newName → mantiene el ECR repo
+sed -i "s|newName:.*|newName: ${ECR_REPO_NAME}|g" "$KUSTOM_FILE"
+
+# newTag → siempre entre comillas
+sed -i "s|newTag:.*|newTag: \"${IMAGE_TAG}\"|g" "$KUSTOM_FILE"
+
+log_info "Imagen actualizada en overlay $DEPLOY_ENV"
+
+# =============================================================================
+# Kustomize build
 # =============================================================================
 FINAL_MANIFEST_DIR="$MANIFESTS_DIR/$DEPLOY_ENV"
 mkdir -p "$FINAL_MANIFEST_DIR"
@@ -158,32 +181,26 @@ mkdir -p "$FINAL_MANIFEST_DIR"
 log_info "Ejecutando kustomize build..."
 kustomize build "$RENDER_DIR" > "$FINAL_MANIFEST_DIR/all.yaml"
 
-log_info "Separando recursos..."
+# =============================================================================
+# Dividir recursos
+# =============================================================================
+log_info "Separando recursos... "
 cd "$FINAL_MANIFEST_DIR"
-
-csplit -f resource- -b "%02d.yaml" all.yaml '/^---$/' '{*}' || true
+csplit -f res- -b "%02d.yaml" all.yaml '/^---$/' '{*}' || true
 rm all.yaml
 
-# =============================================================================
-# Renombrar cada recurso según su Kind
-# =============================================================================
-log_info "Renombrando recursos por Kind..."
-
-for f in resource-*.yaml; do
-    KIND=$(grep -m1 "^kind:" "$f" | awk '{print tolower($2)}')
-
-    case "$KIND" in
-        deployment)   NEW_NAME="deployment.yaml" ;;
-        service)      NEW_NAME="service.yaml" ;;
-        ingress)      NEW_NAME="ingress.yaml" ;;
-        configmap)    NEW_NAME="configmap.yaml" ;;
-        secret)       NEW_NAME="secret.yaml" ;;
-        horizontalpodautoscaler|hpa) NEW_NAME="hpa.yaml" ;;
-        *) NEW_NAME="${KIND}.yaml" ;;
-    esac
-
-    mv "$f" "$NEW_NAME"
-    log_info " → $NEW_NAME"
+# Renombrado
+for f in res*.yaml; do
+  KIND=$(grep -m1 "^kind:" "$f" | awk '{print tolower($2)}')
+  case "$KIND" in
+    deployment) mv "$f" deployment.yaml ;;
+    service) mv "$f" service.yaml ;;
+    ingress) mv "$f" ingress.yaml ;;
+    configmap) mv "$f" configmap.yaml ;;
+    secret) mv "$f" secret.yaml ;;
+    horizontalpodautoscaler) mv "$f" hpa.yaml ;;
+    *) mv "$f" "${KIND}.yaml" ;;
+  esac
 done
 
 log_success "Manifiestos generados correctamente en: $FINAL_MANIFEST_DIR"
@@ -199,6 +216,8 @@ else
   log_warning "AUTO_DEPLOY=false → No se aplicaron cambios"
 fi
 
+log_info "Edita kustomization.yaml con estos valores:"
+echo $KUSTOM_FILE
 log_success "Proceso completado exitosamente para entorno: $DEPLOY_ENV"
 
 # =============================================================================

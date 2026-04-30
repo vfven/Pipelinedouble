@@ -218,6 +218,20 @@ definitions:
         artifacts: 
           - tenable-scan.log
 
+    # Anchor para escanear codigo con sonarqube
+    - &sonarqube-scan-code
+        name: "Sonarqube Scan Code"
+        image: sonarsource/sonar-scanner-cli:latest
+        services:
+          - docker
+        script:
+          - source export_vars.sh
+          - chmod +x infra-cicd-tools/scripts/jira/*.sh
+          - chmod +x infra-cicd-tools/scripts/security/sonarqube.sh
+          - ./infra-cicd-tools/scripts/security/sonarqube.sh 2>&1 | tee sonarqube.log
+        artifacts: 
+          - sonarqube.log
+
     # ========================================================================
     # JIRA
     # ========================================================================
@@ -443,6 +457,7 @@ pipelines:
       - step: *setup-dev-environment    # ← Recibe el artefacto automáticamente
       - step: *build-docker-image       # ← Recibe el artefacto automáticamente
       - step: *tenable-scan-image       # ← Recibe el artefacto automáticamente
+      - step: *sonarqube-scan-code      # ← Recibe el artefacto automáticamente
       #- step: *jira-diagnostic          # ← Valida los valores en jira
       - step: *push-to-ecr              # ← Recibe el artefacto automáticamente
       - step: *generate-k8s-manifests   # ← Recibe el artefacto automáticamente

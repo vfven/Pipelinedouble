@@ -1,38 +1,39 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${APP_NAME}
-  namespace: ${NAMESPACE}
   labels:
-    app: ${APP_NAME}
-    environment: ${DEPLOY_ENV}
+    app: hola-mundobase
+    environment: dev
+  name: hola-mundobase
+  namespace: dev-namespace
 spec:
-  replicas: ${REPLICAS}
+  replicas: null
   selector:
     matchLabels:
-      app: ${APP_NAME}
+      app: hola-mundobase
   template:
     metadata:
       labels:
-        app: ${APP_NAME}
-        version: ${IMAGE_TAG}
+        app: hola-mundobase
+        version: 1.0.0
     spec:
       containers:
-        - name: ${APP_NAME}
-          image: ${IMAGE_FULL}
-          ports:
-            - containerPort: ${APP_PORT}
-          envFrom:
-            - configMapRef:
-                name: ${APP_NAME}-config
-            - secretRef:
-                name: ${APP_NAME}-secrets
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
-          imagePullPolicy: Always
+      - envFrom:
+        - configMapRef:
+            name: hola-mundobase-config
+        - secretRef:
+            name: ecr-registry-secret
+        image: 465344186354.dkr.ecr.us-east-1.amazonaws.com/hola-mundobase:1.0.0
+        imagePullPolicy: Always
+        name: hola-mundobase
+        ports:
+        - containerPort: 3000
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
       restartPolicy: Always

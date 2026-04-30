@@ -1,10 +1,9 @@
+---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
     app: hola-mundobase
-    environment: dev
-    managed-by: devops
   name: hola-mundobase-svc
   namespace: dev-namespace
 spec:
@@ -14,6 +13,4 @@ spec:
     targetPort: 3000
   selector:
     app: hola-mundobase
-    environment: dev
-    managed-by: devops
   type: ClusterIP

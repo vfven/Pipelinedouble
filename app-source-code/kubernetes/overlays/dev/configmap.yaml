@@ -5,9 +5,5 @@ data:
   LOG_LEVEL: null
 kind: ConfigMap
 metadata:
-  labels:
-    app: hola-mundobase
-    environment: dev
-    managed-by: devops
   name: hola-mundobase-config
   namespace: dev-namespace
